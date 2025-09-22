@@ -1,1 +1,0 @@
-// Patient management routes
