@@ -54,4 +54,49 @@ WITH (OIDS=FALSE);
 
 CREATE INDEX idx_session_expire ON session (expire);
 
+-- Audit log table
+CREATE TABLE audit_log (
+    id SERIAL PRIMARY KEY,
+    table_name TEXT NOT NULL,
+    operation TEXT NOT NULL,
+    user_id TEXT,
+    old_data JSONB,
+    new_data JSONB,
+    changed_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Audit trigger function
+CREATE OR REPLACE FUNCTION log_changes()
+RETURNS TRIGGER AS $$
+DECLARE
+    v_user_id TEXT;
+BEGIN
+    BEGIN
+        v_user_id := current_setting('myapp.user_id');
+    EXCEPTION WHEN OTHERS THEN
+        v_user_id := NULL;
+    END;
+
+    IF (TG_OP = 'INSERT') THEN
+        INSERT INTO audit_log (table_name, operation, user_id, new_data)
+        VALUES (TG_TABLE_NAME, TG_OP, v_user_id, row_to_json(NEW));
+        RETURN NEW;
+    ELSIF (TG_OP = 'UPDATE') THEN
+        INSERT INTO audit_log (table_name, operation, user_id, old_data, new_data)
+        VALUES (TG_TABLE_NAME, TG_OP, v_user_id, row_to_json(OLD), row_to_json(NEW));
+        RETURN NEW;
+    ELSIF (TG_OP = 'DELETE') THEN
+        INSERT INTO audit_log (table_name, operation, user_id, old_data)
+        VALUES (TG_TABLE_NAME, TG_OP, v_user_id, row_to_json(OLD));
+        RETURN OLD;
+    END IF;
+    RETURN NULL;
+END;
+$$ LANGUAGE plpgsql;
+
+-- Trigger for patients table
+CREATE TRIGGER patients_audit_trigger
+AFTER INSERT OR UPDATE OR DELETE ON patients
+FOR EACH ROW EXECUTE FUNCTION log_changes();
+
 
