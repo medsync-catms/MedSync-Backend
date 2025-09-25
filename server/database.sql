@@ -37,3 +37,21 @@ INSERT INTO patients (
     true
 );
 
+-- For auth
+CREATE TABLE IF NOT EXISTS users(
+    user_id SERIAL PRIMARY KEY,
+    username VARCHAR(50) UNIQUE NOT NULL,
+    password_hash VARCHAR(100) NOT NULL
+);
+
+CREATE TABLE session (
+    sid varchar NOT NULL COLLATE default,
+    sess json NOT NULL,
+    expire timestamp(6) NOT NULL,
+    CONSTRAINT session_pkey PRIMARY KEY (sid)
+)
+WITH (OIDS=FALSE);
+
+CREATE INDEX idx_session_expire ON session (expire);
+
+
