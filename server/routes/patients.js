@@ -11,7 +11,7 @@ router.get('/', async (req, res) => {
         const allPatients = await pool.query("SELECT * FROM patients");
         res.json(allPatients.rows);
     } catch (err) {
-        res.staus(500).json("Error getting patient data");
+        res.status(500).json("Error getting patient data");
     }
 });
 
