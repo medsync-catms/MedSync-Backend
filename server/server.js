@@ -1,11 +1,13 @@
 const express = require('express');
 const app = express();
 const patientRouter = require('./routes/patients');
+const authRouter = require('./routes/auth');
 
 require('dotenv').config();
 const port = process.env.PORT;
 
 app.use('/patients', patientRouter);
+app.use('/auth', authRouter);
 
 app.get('/', (req, res) => {
     res.send('Home Page')
