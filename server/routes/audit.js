@@ -2,18 +2,16 @@ const express = require('express');
 const sessionMiddleware = require('../config/session');
 const passport = require('../config/passport');
 const router = express.Router();
-const patientController = require('../controllers/patientController');
+const auditController = require('../controllers/auditController');
 const { requireAuth } = require('../middleware/auth');
-const { setAuditUser } = require('../middleware/audit');
 
-// Apply middleware
+// Middleware
 router.use(express.json());
 router.use(sessionMiddleware);
 router.use(passport.initialize());
 router.use(passport.session());
 
 // Routes
-router.get('/', requireAuth, patientController.getAllPatients);
-router.post('/', requireAuth, setAuditUser, patientController.registerPatient);
+router.get('/audit-log', requireAuth, auditController.getAuditLog);
 
 module.exports = router;
