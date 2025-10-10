@@ -2,8 +2,9 @@ const session = require('express-session');
 const pgSession = require('connect-pg-simple')(session);
 const { v7: uuidv7 } = require('uuid');
 const pool = require('./db');
+const path = require('path');
 
-require('dotenv').config();
+require('dotenv').config({ path: path.join(__dirname, '../../.env') });
 
 const sessionConfig = {
     genid: (req) => {

@@ -4,18 +4,23 @@ const pool = require("../config/db");
 
 const register = async (req, res) => {
     try {
-        const { username, password } = req.body;
-        const password_hash = await argon2.hash(password, { timeCost: 8 });
+        const { username, password, role } = req.body;
+
+        if (!username || !password || !role) {
+            return res.status(400).json({ error: "Username, password, and role are required" });
+        }
+
+        const password_hash = await argon2.hash(password, { timeCost: 3 });
 
         await pool.query(
-            "INSERT INTO users(username, password_hash) VALUES ($1, $2)",
-            [username, password_hash]
+            "INSERT INTO users(username, password_hash, role) VALUES ($1, $2, $3)",
+            [username, password_hash, role]
         );
 
-        res.json("User successfully added");
+        res.json({ message: "User successfully added" });
     } catch (err) {
         if (err.code === '23505') { // unique_violation
-            return res.status(400).json("Username already exists");
+            return res.status(400).json({ error: "Username already exists" });
         }
         console.error(err);
         res.status(500).json({ error: "Internal server error" });
@@ -31,7 +36,7 @@ const login = (req, res, next) => {
             if (err) { return next(err); }
             return res.json({
                 message: "Login successful",
-                user: { username: user.username, user_id: user.user_id }
+                user: { id: user.id, username: user.username, role: user.role }
             });
         });
     })(req, res, next);
@@ -53,7 +58,7 @@ const getLoginPage = (req, res) => {
 const getProtectedArea = (req, res) => {
     res.json({
         message: "Welcome to the protected area!",
-        user: { username: req.user.username, user_id: req.user.user_id }
+        user: { id: req.user.id, username: req.user.username, role: req.user.role }
     });
 };
 
@@ -62,8 +67,9 @@ const checkAuthStatus = (req, res) => {
         res.json({
             isAuthenticated: true,
             user: {
-                user_id: req.user.user_id,
-                username: req.user.username
+                id: req.user.id,
+                username: req.user.username,
+                role: req.user.role
             }
         });
     } else {

@@ -10,7 +10,10 @@ const getAllPatients = async (req, res) => {
 };
 
 const registerPatient = async (req, res) => {
+    const client = await pool.connect();
     try {
+        await client.query('BEGIN');
+
         const {
             first_name,
             last_name,
@@ -23,11 +26,27 @@ const registerPatient = async (req, res) => {
             is_active
         } = req.body;
 
-        const newPatient = await pool.query("INSERT INTO patients(first_name, last_name, date_of_birth, gender, address, phone, email, registered_branch, is_active) VALUES($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING *", [first_name, last_name, date_of_birth, gender, address, phone, email, registered_branch, is_active]);
+        // First, create the address
+        const addressResult = await client.query(
+            "INSERT INTO addresses(line1, line2, city, state, postal_code) VALUES($1, $2, $3, $4, $5) RETURNING id",
+            [address.line1, address.line2 || null, address.city, address.state || null, address.postal_code || null]
+        );
+        const address_id = addressResult.rows[0].id;
 
+        // Then create the patient with the address_id
+        const newPatient = await client.query(
+            "INSERT INTO patients(first_name, last_name, date_of_birth, gender, address_id, phone, email, registered_branch, is_active) VALUES($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING *",
+            [first_name, last_name, date_of_birth, gender, address_id, phone, email, registered_branch, is_active !== undefined ? is_active : true]
+        );
+
+        await client.query('COMMIT');
         res.json(newPatient.rows[0]);
-    } catch {
-        res.status(500).json("Error inserting patient data");
+    } catch (err) {
+        await client.query('ROLLBACK');
+        console.error('Error registering patient:', err);
+        res.status(500).json({ error: "Error inserting patient data" });
+    } finally {
+        client.release();
     }
 };
 
