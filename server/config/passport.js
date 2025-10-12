@@ -29,12 +29,12 @@ passport.use(new LocalStrategy(
 
 // serialize the passport user
 passport.serializeUser((user, done) => {
-    done(null, user.user_id);
+    done(null, user.id);
 });
 
-passport.deserializeUser(async (user_id, done) => {
+passport.deserializeUser(async (id, done) => {
     try {
-        const result = await pool.query("SELECT * FROM users WHERE user_id = $1", [user_id]);
+        const result = await pool.query("SELECT * FROM users WHERE id = $1", [id]);
         if (result.rows.length > 0) {
             done(null, result.rows[0]);
         } else {

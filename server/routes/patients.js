@@ -14,6 +14,10 @@ router.use(passport.session());
 
 // Routes
 router.get('/', requireAuth, patientController.getAllPatients);
+router.get('/:id', requireAuth, patientController.getPatientById);
+router.get('/:id/outstanding', requireAuth, patientController.getPatientOutstanding);
 router.post('/', requireAuth, setAuditUser, patientController.registerPatient);
+router.put('/:id', requireAuth, setAuditUser, patientController.updatePatient);
+router.delete('/:id', requireAuth, setAuditUser, patientController.deletePatient);
 
 module.exports = router;
