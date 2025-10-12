@@ -7,7 +7,11 @@ const getAllInvoices = async (req, res) => {
         let query = `
             SELECT i.*,
                    p.first_name as patient_first_name,
-                   p.last_name as patient_last_name
+                   p.last_name as patient_last_name,
+                   COALESCE(
+                       (SELECT json_agg(pay) FROM payments pay WHERE pay.invoice_id = i.id),
+                       '[]'::json
+                   ) as payments
             FROM invoices i
             JOIN patients p ON i.patient_id = p.id
             WHERE 1=1

@@ -8,10 +8,12 @@ const getAllAppointments = async (req, res) => {
             SELECT a.*,
                    p.first_name as patient_first_name, p.last_name as patient_last_name,
                    m.first_name as doctor_first_name, m.last_name as doctor_last_name,
+                   sp.name as specialty,
                    b.name as branch_name
             FROM appointments a
             JOIN patients p ON a.patient_id = p.id
             JOIN medical_staff m ON a.doctor_id = m.id
+            LEFT JOIN specialties sp ON m.specialty_id = sp.id
             JOIN branches b ON a.branch_id = b.id
             WHERE 1=1
         `;
@@ -60,10 +62,12 @@ const getAppointmentById = async (req, res) => {
             SELECT a.*,
                    p.first_name as patient_first_name, p.last_name as patient_last_name,
                    m.first_name as doctor_first_name, m.last_name as doctor_last_name,
+                   sp.name as specialty,
                    b.name as branch_name
             FROM appointments a
             JOIN patients p ON a.patient_id = p.id
             JOIN medical_staff m ON a.doctor_id = m.id
+            LEFT JOIN specialties sp ON m.specialty_id = sp.id
             JOIN branches b ON a.branch_id = b.id
             WHERE a.id = $1
         `, [id]);

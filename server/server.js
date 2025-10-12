@@ -16,6 +16,10 @@ const appointmentRouter = require('./routes/appointments');
 const treatmentRouter = require('./routes/treatments');
 const branchRouter = require('./routes/branches');
 const invoiceRouter = require('./routes/invoices');
+const dashboardRouter = require('./routes/dashboard');
+const staffRouter = require('./routes/staff');
+const insuranceRouter = require('./routes/insurance');
+const reportsRouter = require('./routes/reports');
 
 const port = process.env.PORT || 3000;
 
@@ -31,6 +35,10 @@ app.use('/api/appointments', appointmentRouter);
 app.use('/api/treatments', treatmentRouter);
 app.use('/api/branches', branchRouter);
 app.use('/api/invoices', invoiceRouter);
+app.use('/api/dashboard', dashboardRouter);
+app.use('/api/staff', staffRouter);
+app.use('/api/insurance', insuranceRouter);
+app.use('/api/reports', reportsRouter);
 
 // Health check
 app.get('/api/health', (req, res) => {
@@ -49,6 +57,10 @@ app.get('/', (req, res) => {
             treatments: '/api/treatments',
             branches: '/api/branches',
             invoices: '/api/invoices',
+            dashboard: '/api/dashboard',
+            staff: '/api/staff',
+            insurance: '/api/insurance',
+            reports: '/api/reports',
             audit: '/api/audit'
         }
     });
