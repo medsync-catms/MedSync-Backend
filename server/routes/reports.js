@@ -3,7 +3,7 @@ const sessionMiddleware = require('../config/session');
 const passport = require('../config/passport');
 const router = express.Router();
 const reportsController = require('../controllers/reportsController');
-const { requireAuth } = require('../middleware/auth');
+const { requireManagerOrAdmin } = require('../middleware/auth');
 
 // Apply middleware
 router.use(express.json());
@@ -11,11 +11,11 @@ router.use(sessionMiddleware);
 router.use(passport.initialize());
 router.use(passport.session());
 
-// Routes
-router.get('/branch-summary', requireAuth, reportsController.getBranchSummary);
-router.get('/doctor-revenue', requireAuth, reportsController.getDoctorRevenue);
-router.get('/outstanding-balances', requireAuth, reportsController.getOutstandingBalances);
-router.get('/treatment-analysis', requireAuth, reportsController.getTreatmentAnalysis);
+// Routes - Reports require manager or admin role
+router.get('/branch-summary', requireManagerOrAdmin, reportsController.getBranchSummary);
+router.get('/doctor-revenue', requireManagerOrAdmin, reportsController.getDoctorRevenue);
+router.get('/outstanding-balances', requireManagerOrAdmin, reportsController.getOutstandingBalances);
+router.get('/treatment-analysis', requireManagerOrAdmin, reportsController.getTreatmentAnalysis);
 
 module.exports = router;
 

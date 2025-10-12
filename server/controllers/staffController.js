@@ -1,8 +1,9 @@
 const pool = require('../config/db');
+const argon2 = require('argon2');
 
 const getAllStaff = async (req, res) => {
     try {
-        const { branch_id, role, specialty, is_active } = req.query;
+        const { branch_id, role, specialty, specialty_id, is_active } = req.query;
 
         let query = `
             SELECT s.*, 
@@ -30,6 +31,10 @@ const getAllStaff = async (req, res) => {
             query += ` AND sp.name ILIKE $${paramCount++}`;
             params.push(`%${specialty}%`);
         }
+        if (specialty_id) {
+            query += ` AND s.specialty_id = $${paramCount++}`;
+            params.push(parseInt(specialty_id));
+        }
         if (is_active !== undefined) {
             query += ` AND s.is_active = $${paramCount++}`;
             params.push(is_active === 'true');
@@ -42,6 +47,16 @@ const getAllStaff = async (req, res) => {
     } catch (err) {
         console.error('Error getting staff:', err);
         res.status(500).json({ error: "Error getting staff data" });
+    }
+};
+
+const getAllSpecialties = async (req, res) => {
+    try {
+        const result = await pool.query('SELECT * FROM specialties ORDER BY name');
+        res.json(result.rows);
+    } catch (err) {
+        console.error('Error getting specialties:', err);
+        res.status(500).json({ error: "Error getting specialties data" });
     }
 };
 
@@ -95,15 +110,30 @@ const createStaff = async (req, res) => {
             return res.status(400).json({ error: "First name, last name, role, and branch are required" });
         }
 
+        // Prevent creation of admin or manager roles through this endpoint
+        if (role === 'admin' || role === 'manager') {
+            return res.status(403).json({ error: "Cannot create admin or manager accounts through this endpoint" });
+        }
+
+        // If user is a manager, enforce they can only create staff for their branch
+        if (req.user.role === 'manager' && req.userBranchId) {
+            if (parseInt(branch_id) !== req.userBranchId) {
+                return res.status(403).json({ error: "You can only create staff for your own branch" });
+            }
+        }
+
         // Create user account for staff member
         const generatedUsername = username || `${first_name.toLowerCase()}.${last_name.toLowerCase()}`;
-        const defaultPassword = password || 'ChangeMe123!'; // Should be hashed in production
+        const defaultPassword = password || 'ChangeMe123!';
+        
+        // Hash the password with argon2
+        const password_hash = await argon2.hash(defaultPassword, { timeCost: 3 });
         
         const userResult = await client.query(
             `INSERT INTO users(username, password_hash, role) 
              VALUES($1, $2, $3) 
              RETURNING id`,
-            [generatedUsername, defaultPassword, role.toLowerCase()]
+            [generatedUsername, password_hash, role.toLowerCase()]
         );
         const user_id = userResult.rows[0].id;
 
@@ -241,6 +271,7 @@ const deleteStaff = async (req, res) => {
 
 module.exports = {
     getAllStaff,
+    getAllSpecialties,
     getStaffById,
     createStaff,
     updateStaff,

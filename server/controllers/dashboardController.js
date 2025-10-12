@@ -1,4 +1,5 @@
 const pool = require('../config/db');
+const { getUserMedicalStaffId } = require('../middleware/auth');
 
 const getDashboardStats = async (req, res) => {
     try {
@@ -8,8 +9,20 @@ const getDashboardStats = async (req, res) => {
         const tomorrow = new Date(today);
         tomorrow.setDate(tomorrow.getDate() + 1);
 
+        // Check if user is a doctor to filter stats
+        const isDoctor = req.user && req.user.role === 'doctor';
+        let medicalStaffId = null;
+        
+        if (isDoctor) {
+            medicalStaffId = await getUserMedicalStaffId(req.user.id);
+            
+            if (!medicalStaffId) {
+                return res.status(403).json({ error: "Medical staff ID not found for user" });
+            }
+        }
+
         // Get appointment statistics for today
-        const appointmentStats = await pool.query(`
+        let appointmentQuery = `
             SELECT 
                 COUNT(*) as total,
                 SUM(CASE WHEN status = 'Scheduled' THEN 1 ELSE 0 END) as scheduled,
@@ -17,10 +30,19 @@ const getDashboardStats = async (req, res) => {
                 SUM(CASE WHEN status = 'Cancelled' THEN 1 ELSE 0 END) as cancelled
             FROM appointments
             WHERE appointment_datetime >= $1 AND appointment_datetime < $2
-        `, [today, tomorrow]);
+        `;
+        
+        let appointmentParams = [today, tomorrow];
+        
+        if (isDoctor) {
+            appointmentQuery += ' AND doctor_id = $3';
+            appointmentParams.push(medicalStaffId);
+        }
+        
+        const appointmentStats = await pool.query(appointmentQuery, appointmentParams);
 
-        // Get revenue statistics
-        const revenueStats = await pool.query(`
+        // Get revenue statistics (filtered by doctor's appointments if doctor)
+        let revenueQuery = `
             SELECT 
                 COALESCE(SUM(CASE 
                     WHEN i.created_at >= $1 AND i.created_at < $2 
@@ -34,14 +56,41 @@ const getDashboardStats = async (req, res) => {
                     ELSE 0 
                 END), 0) as outstanding_total
             FROM invoices i
-        `, [today, tomorrow]);
+        `;
+        
+        let revenueParams = [today, tomorrow];
+        
+        if (isDoctor) {
+            revenueQuery += `
+                JOIN appointments a ON i.appointment_id = a.id
+                WHERE a.doctor_id = $3
+            `;
+            revenueParams.push(medicalStaffId);
+        }
+        
+        const revenueStats = await pool.query(revenueQuery, revenueParams);
 
-        // Get insurance claims count
-        const insuranceStats = await pool.query(`
+        // Get insurance claims count (filtered by doctor's appointments if doctor)
+        let insuranceQuery = `
             SELECT COUNT(*) as insurance_claims
-            FROM invoices
-            WHERE insurance_claim_id IS NOT NULL
-        `);
+            FROM invoices i
+            WHERE i.insurance_claim_id IS NOT NULL
+        `;
+        
+        let insuranceParams = [];
+        
+        if (isDoctor) {
+            insuranceQuery = `
+                SELECT COUNT(*) as insurance_claims
+                FROM invoices i
+                JOIN appointments a ON i.appointment_id = a.id
+                WHERE i.insurance_claim_id IS NOT NULL
+                  AND a.doctor_id = $1
+            `;
+            insuranceParams.push(medicalStaffId);
+        }
+        
+        const insuranceStats = await pool.query(insuranceQuery, insuranceParams);
 
         res.json({
             appointments: {
@@ -71,7 +120,19 @@ const getUpcomingAppointments = async (req, res) => {
         const now = new Date();
         const futureTime = new Date(now.getTime() + hours * 60 * 60 * 1000);
 
-        const result = await pool.query(`
+        // Check if user is a doctor to filter appointments
+        const isDoctor = req.user && req.user.role === 'doctor';
+        let medicalStaffId = null;
+        
+        if (isDoctor) {
+            medicalStaffId = await getUserMedicalStaffId(req.user.id);
+            
+            if (!medicalStaffId) {
+                return res.status(403).json({ error: "Medical staff ID not found for user" });
+            }
+        }
+
+        let query = `
             SELECT a.*,
                    p.first_name as patient_first_name, p.last_name as patient_last_name,
                    m.first_name as doctor_first_name, m.last_name as doctor_last_name,
@@ -85,8 +146,18 @@ const getUpcomingAppointments = async (req, res) => {
             WHERE a.appointment_datetime >= $1 
               AND a.appointment_datetime <= $2
               AND a.status IN ('Scheduled', 'Confirmed')
-            ORDER BY a.appointment_datetime ASC
-        `, [now, futureTime]);
+        `;
+        
+        const params = [now, futureTime];
+        
+        if (isDoctor) {
+            query += ' AND a.doctor_id = $3';
+            params.push(medicalStaffId);
+        }
+        
+        query += ' ORDER BY a.appointment_datetime ASC';
+
+        const result = await pool.query(query, params);
 
         res.json(result.rows);
     } catch (err) {
