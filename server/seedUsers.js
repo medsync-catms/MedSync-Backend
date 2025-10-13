@@ -5,11 +5,26 @@
  * 
  * Usage: node server/seedUsers.js
  */
-
+require('dotenv').config();
 const argon2 = require("argon2");
-const pool = require("./config/db");
+const pool = require("./config/db"); // Make sure this exports 'pool' or 'db'
+
+// async function checkConnection() {
+//   try {
+//     const res = await pool.query('SELECT current_database();');
+//     console.log('✅ Connected to DB:', res.rows[0].current_database);
+//   } catch (err) {
+//     console.error('❌ DB Connection Error:', err);
+//   }
+// }
 
 async function seedData() {
+    try {
+        const res = await pool.query('SELECT current_database();');
+        console.log('✅ Connected to DB:', res.rows[0].current_database);
+    } catch (err) {
+        console.error('❌ DB Connection Error:', err);
+    }
     const client = await pool.connect();
     
     try {
