@@ -298,12 +298,14 @@ FOR EACH ROW EXECUTE FUNCTION log_changes();
 -- Insert addresses for branches
 INSERT INTO addresses (line1, line2, city, state, postal_code) VALUES
 ('123 Galle Road', NULL, 'Colombo', 'Western Province', '00300'),
-('456 Temple Street', 'Near Clock Tower', 'Kandy', 'Central Province', '20000');
+('456 Temple Street', 'Near Clock Tower', 'Kandy', 'Central Province', '20000'),
+('789 Beach Road', NULL, 'Galle', 'Southern Province', '80000');
 
 -- Insert branches
 INSERT INTO branches (name, address_id, phone, email, is_active) VALUES
 ('Colombo Branch', 1, '+94112345678', 'colombo@medsync.lk', true),
-('Kandy Branch', 2, '+94812345678', 'kandy@medsync.lk', true);
+('Kandy Branch', 2, '+94812345678', 'kandy@medsync.lk', true),
+('Galle Branch', 3, '+94912345678', 'galle@medsync.lk', true);
 
 -- Insert branch hours (Monday to Friday, 8 AM to 6 PM for both branches)
 INSERT INTO branch_hours (branch_id, day_of_week, open_time, close_time) VALUES
