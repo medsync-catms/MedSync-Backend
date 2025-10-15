@@ -106,6 +106,9 @@ CREATE TABLE patients (
     email TEXT,
     registered_branch INTEGER NOT NULL REFERENCES branches(id) ON DELETE RESTRICT,
     is_active BOOLEAN DEFAULT true,
+    Emergency_contact_name TEXT,
+    Emergency_contact_phone TEXT,
+    Emergency_contact_relation TEXT,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
@@ -400,3 +403,5 @@ INSERT INTO appointments (patient_id, doctor_id, branch_id, appointment_datetime
 --   JOIN patients p ON a.patient_id = p.id 
 --   JOIN medical_staff m ON a.doctor_id = m.id 
 --   JOIN branches b ON a.branch_id = b.id;
+
+
