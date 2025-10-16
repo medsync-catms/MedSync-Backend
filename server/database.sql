@@ -106,12 +106,13 @@ CREATE TABLE patients (
     email TEXT,
     registered_branch INTEGER NOT NULL REFERENCES branches(id) ON DELETE RESTRICT,
     is_active BOOLEAN DEFAULT true,
-    Emergency_contact_name TEXT,
-    Emergency_contact_phone TEXT,
-    Emergency_contact_relation TEXT,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
+ALTER TABLE patients
+    ADD COLUMN Emergency_contact_name TEXT,
+    ADD COLUMN Emergency_contact_phone TEXT,
+    ADD COLUMN Emergency_contact_relation TEXT;
 
 -- Patient emergency contacts table
 CREATE TABLE patient_contacts (

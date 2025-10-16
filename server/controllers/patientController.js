@@ -32,6 +32,7 @@ const getAllPatients = async (req, res) => {
     }
 };
 
+// ...existing code...
 const registerPatient = async (req, res) => {
     const client = await pool.connect();
     try {
@@ -47,30 +48,42 @@ const registerPatient = async (req, res) => {
             email,
             registered_branch,
             is_active,
-            emergency_contact,
+            emergency_contact_name,
+            emergency_contact_phone,
+            emergency_contact_relation,
             insurance
         } = req.body;
 
-        // First, create the address
-        const addressResult = await client.query(
-            "INSERT INTO addresses(line1, line2, city, state, postal_code) VALUES($1, $2, $3, $4, $5) RETURNING id",
-            [address.line1, address.line2 || null, address.city, address.state || null, address.postal_code || null]
-        );
-        const address_id = addressResult.rows[0].id;
+        // Insert address only if provided, otherwise leave address_id null
+        let address_id = null;
+        if (address && address.line1) {
+            const addressResult = await client.query(
+                "INSERT INTO addresses(line1, line2, city, state, postal_code) VALUES($1, $2, $3, $4, $5) RETURNING id",
+                [address.line1, address.line2 || null, address.city || null, address.state || null, address.postal_code || null]
+            );
+            address_id = addressResult.rows[0].id;
+        }
 
-        // Then create the patient with the address_id
+        // Then create the patient with the address_id (may be null)
         const newPatient = await client.query(
-            "INSERT INTO patients(first_name, last_name, date_of_birth, gender, address_id, phone, email, registered_branch, is_active) VALUES($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING *",
-            [first_name, last_name, date_of_birth, gender, address_id, phone, email, registered_branch, is_active !== undefined ? is_active : true]
+            "INSERT INTO patients(first_name, last_name, date_of_birth, gender, address_id, phone, email, registered_branch, is_active, emergency_contact_name, emergency_contact_phone, emergency_contact_relation) VALUES($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12) RETURNING *",
+            [first_name, last_name, date_of_birth, gender, address_id, phone, email, registered_branch, is_active !== undefined ? is_active : true, emergency_contact_name || null, emergency_contact_phone || null, emergency_contact_relation || null]
         );
 
         const patient_id = newPatient.rows[0].id;
 
-        // Save emergency contact if provided
-        if (emergency_contact && emergency_contact.name && emergency_contact.phone) {
+        // Support emergency contact provided either as separate fields or as an object emergency_contact
+        const emergencyObj = req.body.emergency_contact || {
+            name: emergency_contact_name,
+            phone: emergency_contact_phone,
+            relation: emergency_contact_relation
+        };
+
+        // Save emergency contact if any meaningful field provided
+        if (emergencyObj && (emergencyObj.name || emergencyObj.phone || emergencyObj.relation)) {
             await client.query(
                 "INSERT INTO patient_contacts(patient_id, name, phone, relation) VALUES($1, $2, $3, $4)",
-                [patient_id, emergency_contact.name, emergency_contact.phone, emergency_contact.relation || '']
+                [patient_id, emergencyObj.name || '', emergencyObj.phone || '', emergencyObj.relation || '']
             );
         }
 
@@ -112,7 +125,7 @@ const registerPatient = async (req, res) => {
         client.release();
     }
 };
-
+// ...existing code...
 const getPatientById = async (req, res) => {
     try {
         const { id } = req.params;
