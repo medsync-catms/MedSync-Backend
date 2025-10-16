@@ -1,5 +1,8 @@
 const pool = require('../config/db');
 const { getUserMedicalStaffId } = require('../middleware/auth');
+const { validatePhoneNumber } = require('../utils/validation');
+
+
 
 const getAllPatients = async (req, res) => {
     try {
@@ -123,6 +126,27 @@ const registerPatient = async (req, res) => {
         res.status(500).json({ error: "Error inserting patient data" });
     } finally {
         client.release();
+    }
+    try {
+        const { phone, emergency_contact_phone } = req.body;
+
+        // Validate phone numbers
+        if (!validatePhoneNumber(phone)) {
+            return res.status(400).json({ 
+                error: "Invalid phone number format. Must be 10 digits starting with 0" 
+            });
+        }
+
+        if (emergency_contact_phone && !validatePhoneNumber(emergency_contact_phone)) {
+            return res.status(400).json({ 
+                error: "Invalid emergency contact phone number format. Must be 10 digits starting with 0" 
+            });
+        }
+
+        // ... rest of your existing code ...
+    } catch (err) {
+        console.error('Error validating phone numbers:', err);
+        res.status(500).json({ error: "Error validating phone numbers" });
     }
 };
 // ...existing code...

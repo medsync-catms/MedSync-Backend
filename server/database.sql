@@ -406,3 +406,21 @@ INSERT INTO appointments (patient_id, doctor_id, branch_id, appointment_datetime
 --   JOIN branches b ON a.branch_id = b.id;
 
 
+-- Update existing phone numbers in patients table
+UPDATE patients
+SET phone = REGEXP_REPLACE(phone, '[^0-9]', '', 'g')
+WHERE phone IS NOT NULL;
+
+-- Update existing emergency contact phone numbers
+UPDATE patients
+SET Emergency_contact_phone = REGEXP_REPLACE(Emergency_contact_phone, '[^0-9]', '', 'g')
+WHERE Emergency_contact_phone IS NOT NULL;
+
+-- Update existing phone numbers in patient_contacts table
+UPDATE patient_contacts
+SET phone = REGEXP_REPLACE(phone, '[^0-9]', '', 'g')
+WHERE phone IS NOT NULL;
+
+ALTER TABLE patients
+DROP COLUMN phone,
+ADD COLUMN phone varchar(10);
