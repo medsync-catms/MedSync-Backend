@@ -1,4 +1,12 @@
 {
+  "name": "medsync-backend",
+  "version": "1.0.0",
+  "description": "MedSync Clinic Management System Backend",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "nodemon server.js"
+  },
   "dependencies": {
     "argon2": "^0.44.0",
     "connect-pg-simple": "^10.0.0",
@@ -10,5 +18,8 @@
     "passport-local": "^1.0.0",
     "pg": "^8.16.3",
     "uuid": "^13.0.0"
+  },
+  "devDependencies": {
+    "nodemon": "^3.1.10"
   }
 }

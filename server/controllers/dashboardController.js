@@ -74,7 +74,7 @@ const getDashboardStats = async (req, res) => {
         let insuranceQuery = `
             SELECT COUNT(*) as insurance_claims
             FROM invoices i
-            WHERE i.insurance_claim_id IS NOT NULL
+            JOIN insurance_claims ic ON i.id = ic.invoice_id
         `;
         
         let insuranceParams = [];
@@ -83,9 +83,9 @@ const getDashboardStats = async (req, res) => {
             insuranceQuery = `
                 SELECT COUNT(*) as insurance_claims
                 FROM invoices i
+                JOIN insurance_claims ic ON i.id = ic.invoice_id
                 JOIN appointments a ON i.appointment_id = a.id
-                WHERE i.insurance_claim_id IS NOT NULL
-                  AND a.doctor_id = $1
+                WHERE a.doctor_id = $1
             `;
             insuranceParams.push(medicalStaffId);
         }

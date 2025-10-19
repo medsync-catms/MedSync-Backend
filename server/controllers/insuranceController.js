@@ -40,7 +40,7 @@ const getAllClaims = async (req, res) => {
                    i.invoice_number,
                    p.first_name as patient_first_name, 
                    p.last_name as patient_last_name,
-                   ip.provider_id,
+                   pi.provider_id,
                    prov.name as provider_name
             FROM insurance_claims ic
             JOIN invoices i ON ic.invoice_id = i.id
@@ -245,24 +245,34 @@ const approveClaim = async (req, res) => {
             return res.status(400).json({ error: "Valid approved amount is required" });
         }
 
+        // Use stored procedure for claim processing
         const result = await pool.query(
-            `UPDATE insurance_claims
-             SET status = 'Approved',
-                 approved_amount = $1,
-                 response_date = CURRENT_TIMESTAMP,
-                 updated_at = CURRENT_TIMESTAMP
-             WHERE id = $2
-             RETURNING *`,
-            [approved_amount, id]
+            'SELECT * FROM process_insurance_claim($1, $2, $3)',
+            [id, approved_amount, 'Approved']
         );
 
-        if (result.rows.length === 0) {
-            return res.status(404).json({ error: "Insurance claim not found" });
+        const processResult = result.rows[0];
+
+        if (!processResult.success) {
+            return res.status(400).json({ error: processResult.message });
         }
 
-        res.json(result.rows[0]);
+        res.json({
+            message: processResult.message,
+            claim: processResult.claim_record,
+            invoice: processResult.invoice_record
+        });
     } catch (err) {
         console.error('Error approving insurance claim:', err);
+        
+        // Handle trigger-generated errors
+        if (err.message.includes('Claim amount') && err.message.includes('cannot exceed')) {
+            return res.status(400).json({ error: err.message });
+        }
+        if (err.message.includes('exceeds policy maximum claim limit')) {
+            return res.status(400).json({ error: err.message });
+        }
+        
         res.status(500).json({ error: "Error approving insurance claim" });
     }
 };
@@ -374,5 +384,91 @@ module.exports = {
     approveClaim,
     rejectClaim,
     resubmitClaim
+};
+
+// Add policy expiration checking endpoint
+const checkExpiringPolicies = async (req, res) => {
+    try {
+        const { days_ahead } = req.query;
+        const daysThreshold = parseInt(days_ahead) || 30;
+        
+        const result = await pool.query(`
+            SELECT 
+                pi.id,
+                pi.patient_id,
+                pi.provider_id,
+                pi.policy_number,
+                pi.expiration_date,
+                pi.expiration_date - CURRENT_DATE as days_until_expiry,
+                p.first_name || ' ' || p.last_name as patient_name,
+                p.phone as patient_phone,
+                p.email as patient_email,
+                prov.name as provider_name
+            FROM patient_insurance pi
+            JOIN patients p ON pi.patient_id = p.id
+            JOIN insurance_providers prov ON pi.provider_id = prov.id
+            WHERE pi.is_active = true
+              AND pi.expiration_date BETWEEN CURRENT_DATE AND CURRENT_DATE + INTERVAL '${daysThreshold} days'
+            ORDER BY pi.expiration_date ASC
+        `);
+        
+        res.json({
+            expiring_policies: result.rows,
+            count: result.rows.length,
+            days_threshold: daysThreshold
+        });
+    } catch (err) {
+        console.error('Error checking expiring policies:', err);
+        res.status(500).json({ error: "Error checking expiring policies" });
+    }
+};
+
+// Add function to process insurance claim payment
+const processClaimPayment = async (req, res) => {
+    try {
+        const { id } = req.params;
+        const { approved_amount } = req.body;
+
+        if (!approved_amount || approved_amount <= 0) {
+            return res.status(400).json({ error: "Valid approved amount is required" });
+        }
+
+        // Use stored procedure to process claim as paid
+        const result = await pool.query(
+            'SELECT * FROM process_insurance_claim($1, $2, $3)',
+            [id, approved_amount, 'Paid']
+        );
+
+        const processResult = result.rows[0];
+
+        if (!processResult.success) {
+            return res.status(400).json({ error: processResult.message });
+        }
+
+        res.json({
+            message: processResult.message,
+            claim: processResult.claim_record,
+            invoice: processResult.invoice_record
+        });
+    } catch (err) {
+        console.error('Error processing claim payment:', err);
+        res.status(500).json({ error: "Error processing claim payment" });
+    }
+};
+
+module.exports = {
+    getAllProviders,
+    getProviderById,
+    getAllClaims,
+    getClaimById,
+    createClaim,
+    updateClaim,
+    deleteClaim,
+    getClaimStats,
+    approveClaim,
+    rejectClaim,
+    resubmitClaim,
+    checkExpiringPolicies,
+    processClaimPayment
 };
 

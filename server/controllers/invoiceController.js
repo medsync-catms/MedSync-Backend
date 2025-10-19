@@ -283,10 +283,7 @@ const deleteInvoice = async (req, res) => {
 
 // Payment-related functions
 const createPayment = async (req, res) => {
-    const client = await pool.connect();
     try {
-        await client.query('BEGIN');
-
         const {
             invoice_id,
             amount,
@@ -299,48 +296,29 @@ const createPayment = async (req, res) => {
             return res.status(400).json({ error: "Invoice, amount, and payment method are required" });
         }
 
-        // Create payment
-        const paymentResult = await client.query(
+        // Create payment - triggers will handle status updates automatically
+        const paymentResult = await pool.query(
             `INSERT INTO payments(invoice_id, amount, payment_method, transaction_reference, processed_by, notes)
              VALUES($1, $2, $3, $4, $5, $6) RETURNING *`,
             [invoice_id, amount, payment_method, transaction_reference || null, req.user.id, notes || null]
         );
 
-        // Get total paid for this invoice
-        const totalPaidResult = await client.query(
-            'SELECT COALESCE(SUM(amount), 0) as total_paid FROM payments WHERE invoice_id = $1',
-            [invoice_id]
-        );
-        const totalPaid = parseFloat(totalPaidResult.rows[0].total_paid);
-
-        // Get invoice total
-        const invoiceResult = await client.query(
-            'SELECT total_amount FROM invoices WHERE id = $1',
-            [invoice_id]
-        );
-        const invoiceTotal = parseFloat(invoiceResult.rows[0].total_amount);
-
-        // Update invoice status based on payment
-        let newStatus;
-        if (totalPaid >= invoiceTotal) {
-            newStatus = 'Paid';
-        } else {
-            newStatus = 'Sent';
-        }
-
-        await client.query(
-            'UPDATE invoices SET status = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2',
-            [newStatus, invoice_id]
-        );
-
-        await client.query('COMMIT');
         res.status(201).json(paymentResult.rows[0]);
     } catch (err) {
-        await client.query('ROLLBACK');
         console.error('Error creating payment:', err);
+        
+        // Handle trigger-generated errors
+        if (err.message.includes('overpayment')) {
+            return res.status(400).json({ error: err.message });
+        }
+        if (err.message.includes('Transaction reference is required')) {
+            return res.status(400).json({ error: err.message });
+        }
+        if (err.message.includes('Cannot process payment for cancelled invoice')) {
+            return res.status(400).json({ error: err.message });
+        }
+        
         res.status(500).json({ error: "Error creating payment" });
-    } finally {
-        client.release();
     }
 };
 

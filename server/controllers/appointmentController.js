@@ -220,39 +220,11 @@ const createAppointment = async (req, res) => {
             appointment_datetime,
             status,
             type,
-            notes,
-            override_validations // Allow override for walk-ins/emergencies
+            notes
         } = req.body;
 
         if (!patient_id || !doctor_id || !branch_id || !appointment_datetime) {
             return res.status(400).json({ error: "Patient, doctor, branch, and appointment datetime are required" });
-        }
-
-        // Run validations (skip for walk-ins/emergencies if override is true)
-        if (!override_validations) {
-            // Check patient registration
-            const patientValidation = await validatePatientRegistration(patient_id);
-            if (!patientValidation.valid) {
-                return res.status(400).json({ error: patientValidation.message, validation: 'patient' });
-            }
-
-            // Check doctor conflicts
-            const hasConflict = await checkDoctorConflict(doctor_id, appointment_datetime);
-            if (hasConflict) {
-                return res.status(409).json({ 
-                    error: "Doctor has a conflicting appointment at this time",
-                    validation: 'conflict'
-                });
-            }
-
-            // Check clinic hours
-            const hoursValidation = await validateClinicHours(branch_id, appointment_datetime);
-            if (!hoursValidation.valid) {
-                return res.status(400).json({ 
-                    error: hoursValidation.message,
-                    validation: 'hours'
-                });
-            }
         }
 
         const result = await pool.query(
@@ -264,7 +236,38 @@ const createAppointment = async (req, res) => {
         res.status(201).json(result.rows[0]);
     } catch (err) {
         console.error('Error creating appointment:', err);
-        res.status(500).json({ error: "Error creating appointment" });
+        
+        // Log the full error for debugging
+        console.error('Full error details:', err.message, err.code, err.detail);
+        
+        // Handle trigger-generated validation errors
+        if (err.message.includes('Doctor has a conflicting appointment')) {
+            return res.status(409).json({ 
+                error: err.message,
+                validation: 'conflict'
+            });
+        }
+        if (err.message.includes('Clinic is closed on this day')) {
+            return res.status(400).json({ 
+                error: err.message,
+                validation: 'hours'
+            });
+        }
+        if (err.message.includes('Appointment time must be between')) {
+            return res.status(400).json({ 
+                error: err.message,
+                validation: 'hours'
+            });
+        }
+        if (err.message.includes('Patient') && (err.message.includes('required') || err.message.includes('inactive'))) {
+            return res.status(400).json({ 
+                error: err.message,
+                validation: 'patient'
+            });
+        }
+        
+        // Return the actual error message instead of generic one
+        res.status(500).json({ error: err.message || "Error creating appointment" });
     }
 };
 
@@ -483,7 +486,7 @@ const addTreatmentRecord = async (req, res) => {
 
         // Validate appointment status
         const appointmentCheck = await pool.query(
-            'SELECT status FROM appointments WHERE id = $1',
+            'SELECT status, doctor_id FROM appointments WHERE id = $1',
             [id]
         );
 
@@ -492,10 +495,28 @@ const addTreatmentRecord = async (req, res) => {
         }
 
         const appointmentStatus = appointmentCheck.rows[0].status;
+        const appointmentDoctorId = appointmentCheck.rows[0].doctor_id;
+
         if (!['In Progress', 'Completed'].includes(appointmentStatus)) {
             return res.status(400).json({ 
                 error: "Treatments can only be added to In Progress or Completed appointments" 
             });
+        }
+
+        // Only doctors can add treatments - verify user is a doctor
+        if (req.user.role !== 'doctor') {
+            return res.status(403).json({ error: "Access denied. Only doctors can add treatments." });
+        }
+
+        // Verify this is the doctor's appointment
+        const medicalStaffId = await getUserMedicalStaffId(req.user.id);
+        
+        if (!medicalStaffId) {
+            return res.status(403).json({ error: "Medical staff ID not found for user" });
+        }
+        
+        if (appointmentDoctorId !== medicalStaffId) {
+            return res.status(403).json({ error: "Access denied. Only the assigned doctor can add treatments for this appointment." });
         }
 
         // Check if invoice already exists for this appointment
@@ -510,12 +531,8 @@ const addTreatmentRecord = async (req, res) => {
             });
         }
 
-        // Get the doctor's medical staff ID from the appointment
-        const doctorResult = await pool.query(
-            'SELECT doctor_id FROM appointments WHERE id = $1',
-            [id]
-        );
-        const recorded_by = doctorResult.rows[0].doctor_id;
+        // Use the appointment's doctor as the recorded_by
+        const recorded_by = appointmentDoctorId;
 
         const result = await pool.query(
             `INSERT INTO treatment_records(appointment_id, treatment_id, quantity, unit_price, consultation_notes, recorded_by)
@@ -584,6 +601,32 @@ const updateTreatmentRecord = async (req, res) => {
         const { id, treatmentRecordId } = req.params;
         const { quantity, unit_price, consultation_notes } = req.body;
 
+        // Only doctors can update treatments - verify user is a doctor
+        if (req.user.role !== 'doctor') {
+            return res.status(403).json({ error: "Access denied. Only doctors can modify treatments." });
+        }
+
+        // Verify this is the doctor's appointment
+        const medicalStaffId = await getUserMedicalStaffId(req.user.id);
+        
+        if (!medicalStaffId) {
+            return res.status(403).json({ error: "Medical staff ID not found for user" });
+        }
+        
+        // Check if this appointment belongs to the doctor
+        const appointmentCheck = await pool.query(
+            'SELECT doctor_id FROM appointments WHERE id = $1',
+            [id]
+        );
+        
+        if (appointmentCheck.rows.length === 0) {
+            return res.status(404).json({ error: "Appointment not found" });
+        }
+        
+        if (appointmentCheck.rows[0].doctor_id !== medicalStaffId) {
+            return res.status(403).json({ error: "Access denied. Only the assigned doctor can modify treatments for this appointment." });
+        }
+
         // Check if invoice exists
         const invoiceCheck = await pool.query(
             'SELECT id FROM invoices WHERE appointment_id = $1',
@@ -621,6 +664,32 @@ const deleteTreatmentRecord = async (req, res) => {
     try {
         const { id, treatmentRecordId } = req.params;
 
+        // Only doctors can delete treatments - verify user is a doctor
+        if (req.user.role !== 'doctor') {
+            return res.status(403).json({ error: "Access denied. Only doctors can delete treatments." });
+        }
+
+        // Verify this is the doctor's appointment
+        const medicalStaffId = await getUserMedicalStaffId(req.user.id);
+        
+        if (!medicalStaffId) {
+            return res.status(403).json({ error: "Medical staff ID not found for user" });
+        }
+        
+        // Check if this appointment belongs to the doctor
+        const appointmentCheck = await pool.query(
+            'SELECT doctor_id FROM appointments WHERE id = $1',
+            [id]
+        );
+        
+        if (appointmentCheck.rows.length === 0) {
+            return res.status(404).json({ error: "Appointment not found" });
+        }
+        
+        if (appointmentCheck.rows[0].doctor_id !== medicalStaffId) {
+            return res.status(403).json({ error: "Access denied. Only the assigned doctor can delete treatments for this appointment." });
+        }
+
         // Check if invoice exists
         const invoiceCheck = await pool.query(
             'SELECT id FROM invoices WHERE appointment_id = $1',
@@ -634,8 +703,8 @@ const deleteTreatmentRecord = async (req, res) => {
         }
 
         const result = await pool.query(
-            'DELETE FROM treatment_records WHERE id = $1 AND appointment_id = $2 RETURNING *',
-            [treatmentRecordId, id]
+            'DELETE FROM treatment_records WHERE id = $1 RETURNING *',
+            [treatmentRecordId]
         );
 
         if (result.rows.length === 0) {
@@ -650,104 +719,33 @@ const deleteTreatmentRecord = async (req, res) => {
 };
 
 const completeAppointmentWithInvoice = async (req, res) => {
-    const client = await pool.connect();
     try {
-        await client.query('BEGIN');
-
         const { id } = req.params; // appointment_id
 
-        // Get appointment details
-        const appointmentResult = await client.query(
-            'SELECT * FROM appointments WHERE id = $1',
+        // Use stored procedure for appointment completion
+        const result = await pool.query(
+            'SELECT * FROM complete_appointment_workflow($1)',
             [id]
         );
 
-        if (appointmentResult.rows.length === 0) {
-            await client.query('ROLLBACK');
-            return res.status(404).json({ error: "Appointment not found" });
+        const workflowResult = result.rows[0];
+
+        if (!workflowResult.success) {
+            return res.status(400).json({ error: workflowResult.message });
         }
 
-        const appointment = appointmentResult.rows[0];
-
-        // Check if already completed
-        if (appointment.status === 'Completed') {
-            await client.query('ROLLBACK');
-            return res.status(400).json({ error: "Appointment is already completed" });
-        }
-
-        // Get treatment records
-        const treatmentRecordsResult = await client.query(
-            'SELECT * FROM treatment_records WHERE appointment_id = $1',
-            [id]
-        );
-
-        if (treatmentRecordsResult.rows.length === 0) {
-            await client.query('ROLLBACK');
-            return res.status(400).json({ 
-                error: "Cannot complete appointment without treatment records" 
-            });
-        }
-
-        // Calculate total amount
-        const totalResult = await client.query(
-            'SELECT SUM(total_price) as total FROM treatment_records WHERE appointment_id = $1',
-            [id]
-        );
-        const totalAmount = parseFloat(totalResult.rows[0].total) || 0;
-
-        // Generate unique invoice number
-        const date = new Date();
-        const dateStr = date.toISOString().slice(0, 10).replace(/-/g, '');
-        let invoiceNumber;
-        let attempts = 0;
-        let invoiceCreated = false;
-
-        while (!invoiceCreated && attempts < 5) {
-            const randomNum = Math.floor(1000 + Math.random() * 9000);
-            invoiceNumber = `INV-${dateStr}-${randomNum}`;
-
-            try {
-                const invoiceResult = await client.query(
-                    `INSERT INTO invoices(patient_id, appointment_id, invoice_number, total_amount, status)
-                     VALUES($1, $2, $3, $4, $5) RETURNING *`,
-                    [appointment.patient_id, id, invoiceNumber, totalAmount, 'Draft']
-                );
-
-                invoiceCreated = true;
-
-                // Update appointment status to Completed
-                await client.query(
-                    'UPDATE appointments SET status = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2',
-                    ['Completed', id]
-                );
-
-                await client.query('COMMIT');
-
-                res.json({
-                    message: "Appointment completed and invoice generated successfully",
-                    invoice: invoiceResult.rows[0],
-                    appointment: { ...appointment, status: 'Completed' }
-                });
-            } catch (err) {
-                if (err.code === '23505') { // unique_violation
-                    attempts++;
-                    continue;
-                } else {
-                    throw err;
-                }
-            }
-        }
-
-        if (!invoiceCreated) {
-            await client.query('ROLLBACK');
-            return res.status(500).json({ error: "Failed to generate unique invoice number" });
-        }
+        res.json({
+            message: workflowResult.message,
+            invoice: {
+                id: workflowResult.invoice_id,
+                invoice_number: workflowResult.invoice_number,
+                total_amount: workflowResult.total_amount
+            },
+            appointment_id: id
+        });
     } catch (err) {
-        await client.query('ROLLBACK');
         console.error('Error completing appointment with invoice:', err);
         res.status(500).json({ error: "Error completing appointment with invoice" });
-    } finally {
-        client.release();
     }
 };
 

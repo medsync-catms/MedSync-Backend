@@ -1,16 +1,8 @@
 const express = require('express');
-const sessionMiddleware = require('../config/session');
-const passport = require('../config/passport');
 const router = express.Router();
 const invoiceController = require('../controllers/invoiceController');
 const { requireAuth, requireStaffOrAbove } = require('../middleware/auth');
 const { setAuditUser } = require('../middleware/audit');
-
-// Apply middleware
-router.use(express.json());
-router.use(sessionMiddleware);
-router.use(passport.initialize());
-router.use(passport.session());
 
 // Invoice routes - require staff or above
 router.get('/', requireAuth, invoiceController.getAllInvoices);

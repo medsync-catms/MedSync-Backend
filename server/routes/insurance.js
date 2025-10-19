@@ -1,16 +1,8 @@
 const express = require('express');
-const sessionMiddleware = require('../config/session');
-const passport = require('../config/passport');
 const router = express.Router();
 const insuranceController = require('../controllers/insuranceController');
 const { requireAuth, requireStaffOrAbove, requireManagerOrAdmin } = require('../middleware/auth');
 const { setAuditUser } = require('../middleware/audit');
-
-// Apply middleware
-router.use(express.json());
-router.use(sessionMiddleware);
-router.use(passport.initialize());
-router.use(passport.session());
 
 // Insurance Provider Routes - all authenticated users can view
 router.get('/providers', requireAuth, insuranceController.getAllProviders);
@@ -27,7 +19,11 @@ router.delete('/claims/:id', requireStaffOrAbove, setAuditUser, insuranceControl
 // Claim actions - require manager or admin
 router.put('/claims/:id/approve', requireManagerOrAdmin, setAuditUser, insuranceController.approveClaim);
 router.put('/claims/:id/reject', requireManagerOrAdmin, setAuditUser, insuranceController.rejectClaim);
+router.put('/claims/:id/pay', requireManagerOrAdmin, setAuditUser, insuranceController.processClaimPayment);
 router.post('/claims/:id/resubmit', requireStaffOrAbove, setAuditUser, insuranceController.resubmitClaim);
+
+// Policy management routes
+router.get('/policies/expiring', requireAuth, insuranceController.checkExpiringPolicies);
 
 module.exports = router;
 
