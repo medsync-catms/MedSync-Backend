@@ -1,12 +1,14 @@
 const rateLimit = require('express-rate-limit');
 
-// limit to 5 requests per 15 minutes per IP
-const loginLimiter = rateLimit({
-    windowMs: 15 * 60 * 1000 * 2, // 15 minutes
-    limit: 5,
-    message: "Too many login attempts from this IP, please try again later",
-    standardHeaders: true,
-    legacyHeaders: false,
-});
+// Disable rate limiting in test environment
+const loginLimiter = process.env.NODE_ENV === 'test' 
+  ? (req, res, next) => next() // Skip rate limiting in tests
+  : rateLimit({
+      windowMs: 15 * 60 * 1000 * 2, // 15 minutes
+      limit: 5,
+      message: "Too many login attempts from this IP, please try again later",
+      standardHeaders: true,
+      legacyHeaders: false,
+    });
 
 module.exports = { loginLimiter };

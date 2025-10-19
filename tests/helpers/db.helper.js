@@ -7,7 +7,11 @@ require('dotenv').config({ path: path.join(__dirname, '../../.env.test') });
 class DatabaseHelper {
   constructor() {
     this.pool = new Pool({
-      connectionString: process.env.DATABASE_URL,
+      user: process.env.DB_USER || 'postgres',
+      password: process.env.DB_PASSWORD || '',
+      host: process.env.DB_HOST || 'localhost',
+      port: process.env.DB_PORT || 5432,
+      database: process.env.DB_NAME || 'medsync_test_db',
       ssl: false
     });
   }

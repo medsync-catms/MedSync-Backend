@@ -7,7 +7,7 @@ class AuthHelper {
   }
 
   async loginAs(role, agent = null) {
-    const testAgent = agent || request(app);
+    const testAgent = agent || request.agent(app);
     
     const credentials = this.getCredentialsByRole(role);
     
@@ -123,7 +123,7 @@ class AuthHelper {
 
   // Helper to create a fresh agent for each test
   createFreshAgent() {
-    return request(app);
+    return request.agent(app);
   }
 
   // Helper to test login with invalid credentials
@@ -142,7 +142,7 @@ class AuthHelper {
     
     // Make a request that requires authentication
     const response = await agent
-      .get('/api/dashboard')
+      .get('/api/dashboard/stats')
       .expect(200);
     
     expect(response.body.user.id).toBe(user.id);
@@ -161,7 +161,7 @@ class AuthHelper {
     
     // Try to access protected route
     await agent
-      .get('/api/dashboard')
+      .get('/api/dashboard/stats')
       .expect(401);
   }
 
