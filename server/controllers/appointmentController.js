@@ -237,9 +237,6 @@ const createAppointment = async (req, res) => {
     } catch (err) {
         console.error('Error creating appointment:', err);
         
-        // Log the full error for debugging
-        console.error('Full error details:', err.message, err.code, err.detail);
-        
         // Handle trigger-generated validation errors
         if (err.message.includes('Doctor has a conflicting appointment')) {
             return res.status(409).json({ 
@@ -247,27 +244,20 @@ const createAppointment = async (req, res) => {
                 validation: 'conflict'
             });
         }
-        if (err.message.includes('Clinic is closed on this day')) {
+        if (err.message.includes('Clinic is closed on this day') || err.message.includes('Appointment time must be between')) {
             return res.status(400).json({ 
                 error: err.message,
                 validation: 'hours'
             });
         }
-        if (err.message.includes('Appointment time must be between')) {
-            return res.status(400).json({ 
-                error: err.message,
-                validation: 'hours'
-            });
-        }
-        if (err.message.includes('Patient') && (err.message.includes('required') || err.message.includes('inactive'))) {
+        if (err.message.includes('Patient') && err.message.includes('required')) {
             return res.status(400).json({ 
                 error: err.message,
                 validation: 'patient'
             });
         }
         
-        // Return the actual error message instead of generic one
-        res.status(500).json({ error: err.message || "Error creating appointment" });
+        res.status(500).json({ error: "Error creating appointment" });
     }
 };
 

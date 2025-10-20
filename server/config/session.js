@@ -27,10 +27,10 @@ const sessionConfig = {
     saveUninitialized: false,
     cookie: {
         maxAge: 1000 * 60 * 60 * 24,
-        httpOnly: false, // Allow JavaScript access for tests
-        secure: false, // Disable secure cookies for tests
+        httpOnly: true,
+        secure: process.env.NODE_ENV === 'production',
         sameSite: 'lax',
-        domain: undefined // Remove domain restriction for tests
+        domain: process.env.NODE_ENV === 'production' ? undefined : 'localhost'
     }
 };
 
