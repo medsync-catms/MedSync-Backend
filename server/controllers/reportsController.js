@@ -1,4 +1,5 @@
 const pool = require('../config/db');
+const PDFDocument = require('pdfkit');
 
 const getBranchSummary = async (req, res) => {
     try {
@@ -40,24 +41,27 @@ const getDoctorRevenue = async (req, res) => {
     try {
         const { start_date, end_date, branch_id } = req.query;
         
-        let dateFilter = '';
-        let branchFilter = '';
         const params = [];
         let paramCount = 1;
+        const whereClauses = [];
 
+        // Build WHERE clauses for the subquery
         if (start_date && end_date) {
-            dateFilter = `AND a.appointment_datetime >= $${paramCount++} AND a.appointment_datetime <= $${paramCount++}`;
+            whereClauses.push(`a.appointment_datetime >= $${paramCount++}`);
+            whereClauses.push(`a.appointment_datetime <= $${paramCount++}`);
             params.push(start_date, end_date);
         }
         if (branch_id) {
-            branchFilter = `AND a.branch_id = $${paramCount++}`;
+            whereClauses.push(`a.branch_id = $${paramCount++}`);
             params.push(branch_id);
         }
+
+        const whereClause = whereClauses.length > 0 ? `AND ${whereClauses.join(' AND ')}` : '';
 
         const result = await pool.query(`
             SELECT 
                 m.first_name || ' ' || m.last_name as doctor_name,
-                m.specialty,
+                COALESCE(s.name, 'General') as specialty,
                 b.name as branch_name,
                 COUNT(DISTINCT a.id) as total_appointments,
                 COUNT(DISTINCT CASE WHEN a.status = 'Completed' THEN a.id END) as completed_appointments,
@@ -65,18 +69,22 @@ const getDoctorRevenue = async (req, res) => {
                 COALESCE(SUM(CASE WHEN i.status = 'Paid' THEN i.total_amount ELSE 0 END), 0) as collected_revenue,
                 COALESCE(SUM(CASE WHEN i.status IN ('Draft', 'Sent', 'Overdue') THEN i.total_amount ELSE 0 END), 0) as outstanding_revenue
             FROM medical_staff m
-            LEFT JOIN appointments a ON m.id = a.doctor_id ${dateFilter} ${branchFilter}
+            LEFT JOIN users u ON m.user_id = u.id
+            LEFT JOIN appointments a ON m.id = a.doctor_id ${whereClause}
             LEFT JOIN invoices i ON a.patient_id = i.patient_id 
                 AND DATE(a.appointment_datetime) = DATE(i.created_at)
             LEFT JOIN branches b ON m.branch_id = b.id
-            WHERE m.role = 'Doctor' OR m.role = 'doctor'
-            GROUP BY m.id, m.first_name, m.last_name, m.specialty, b.name
+            LEFT JOIN specialties s ON m.specialty_id = s.id
+            WHERE LOWER(u.role::text) = 'doctor'
+            GROUP BY m.id, m.first_name, m.last_name, s.name, b.name
             ORDER BY total_revenue DESC
         `, params);
 
         res.json(result.rows);
     } catch (err) {
         console.error('Error getting doctor revenue:', err);
+        console.error('Error details:', err.message);
+        console.error('Query params:', params);
         res.status(500).json({ error: "Error getting doctor revenue report" });
     }
 };
@@ -104,20 +112,20 @@ const getTreatmentAnalysis = async (req, res) => {
         let dateFilter = '';
         const params = [];
         if (start_date && end_date) {
-            dateFilter = 'AND ii.created_at >= $1 AND ii.created_at <= $2';
+            dateFilter = 'AND tr.created_at >= $1 AND tr.created_at <= $2';
             params.push(start_date, end_date);
         }
 
         const result = await pool.query(`
             SELECT 
                 tc.name as category,
-                COUNT(DISTINCT ii.id) as treatment_count,
-                COALESCE(SUM(ii.quantity), 0) as total_quantity,
-                COALESCE(SUM(ii.subtotal), 0) as total_revenue,
-                COALESCE(AVG(ii.unit_price), 0) as avg_price
+                COUNT(DISTINCT tr.id) as treatment_count,
+                COALESCE(SUM(tr.quantity), 0) as total_quantity,
+                COALESCE(SUM(tr.total_price), 0) as total_revenue,
+                COALESCE(AVG(tr.unit_price), 0) as avg_price
             FROM treatment_categories tc
             LEFT JOIN treatments t ON tc.id = t.category_id
-            LEFT JOIN invoice_items ii ON t.id = ii.treatment_id ${dateFilter}
+            LEFT JOIN treatment_records tr ON t.id = tr.treatment_id ${dateFilter}
             GROUP BY tc.id, tc.name
             ORDER BY total_revenue DESC
         `, params);
@@ -310,6 +318,237 @@ const getNotificationReport = async (req, res) => {
     }
 };
 
+// Export functions
+const exportBranchSummary = async (req, res) => {
+    try {
+        const { format, start_date, end_date } = req.body;
+        
+        // Get the data first
+        let dateFilter = '';
+        const params = [];
+        if (start_date && end_date) {
+            dateFilter = 'AND a.appointment_datetime >= $1 AND a.appointment_datetime <= $2';
+            params.push(start_date, end_date);
+        }
+
+        const result = await pool.query(`
+            SELECT 
+                b.name as branch,
+                COUNT(a.id) as total,
+                SUM(CASE WHEN a.status = 'Scheduled' OR a.status = 'Confirmed' THEN 1 ELSE 0 END) as scheduled,
+                SUM(CASE WHEN a.status = 'Completed' THEN 1 ELSE 0 END) as completed,
+                SUM(CASE WHEN a.status = 'Cancelled' THEN 1 ELSE 0 END) as cancelled,
+                CASE 
+                    WHEN COUNT(a.id) > 0 
+                    THEN ROUND(100.0 * SUM(CASE WHEN a.status = 'Completed' THEN 1 ELSE 0 END) / COUNT(a.id), 0)
+                    ELSE 0 
+                END as completion_rate
+            FROM branches b
+            LEFT JOIN appointments a ON b.id = a.branch_id ${dateFilter}
+            GROUP BY b.id, b.name
+            ORDER BY b.name
+        `, params);
+
+        const data = result.rows;
+        const title = 'Branch Summary Report';
+        const dateRange = start_date && end_date ? `${start_date} to ${end_date}` : 'All Time';
+
+        await generatePDF(res, title, dateRange, data, [
+            { key: 'branch', label: 'Branch' },
+            { key: 'total', label: 'Total' },
+            { key: 'scheduled', label: 'Scheduled' },
+            { key: 'completed', label: 'Completed' },
+            { key: 'cancelled', label: 'Cancelled' },
+            { key: 'completion_rate', label: 'Completion %' }
+        ]);
+    } catch (err) {
+        console.error('Error exporting branch summary:', err);
+        res.status(500).json({ error: "Error exporting branch summary report" });
+    }
+};
+
+const exportDoctorRevenue = async (req, res) => {
+    try {
+        const { start_date, end_date, branch_id } = req.body;
+        
+        const params = [];
+        let paramCount = 1;
+        const whereClauses = [];
+
+        // Build WHERE clauses for the subquery
+        if (start_date && end_date) {
+            whereClauses.push(`a.appointment_datetime >= $${paramCount++}`);
+            whereClauses.push(`a.appointment_datetime <= $${paramCount++}`);
+            params.push(start_date, end_date);
+        }
+        if (branch_id) {
+            whereClauses.push(`a.branch_id = $${paramCount++}`);
+            params.push(branch_id);
+        }
+
+        const whereClause = whereClauses.length > 0 ? `AND ${whereClauses.join(' AND ')}` : '';
+
+        const result = await pool.query(`
+            SELECT 
+                m.first_name || ' ' || m.last_name as doctor_name,
+                COALESCE(s.name, 'General') as specialty,
+                b.name as branch_name,
+                COUNT(DISTINCT a.id) as total_appointments,
+                COUNT(DISTINCT CASE WHEN a.status = 'Completed' THEN a.id END) as completed_appointments,
+                COALESCE(SUM(i.total_amount), 0) as total_revenue,
+                COALESCE(SUM(CASE WHEN i.status = 'Paid' THEN i.total_amount ELSE 0 END), 0) as collected_revenue,
+                COALESCE(SUM(CASE WHEN i.status IN ('Draft', 'Sent', 'Overdue') THEN i.total_amount ELSE 0 END), 0) as outstanding_revenue
+            FROM medical_staff m
+            LEFT JOIN users u ON m.user_id = u.id
+            LEFT JOIN appointments a ON m.id = a.doctor_id ${whereClause}
+            LEFT JOIN invoices i ON a.patient_id = i.patient_id 
+                AND DATE(a.appointment_datetime) = DATE(i.created_at)
+            LEFT JOIN branches b ON m.branch_id = b.id
+            LEFT JOIN specialties s ON m.specialty_id = s.id
+            WHERE LOWER(u.role::text) = 'doctor'
+            GROUP BY m.id, m.first_name, m.last_name, s.name, b.name
+            ORDER BY total_revenue DESC
+        `, params);
+
+        const data = result.rows;
+        const title = 'Doctor Revenue Report';
+        const dateRange = start_date && end_date ? `${start_date} to ${end_date}` : 'All Time';
+
+        await generatePDF(res, title, dateRange, data, [
+            { key: 'doctor_name', label: 'Doctor' },
+            { key: 'specialty', label: 'Specialty' },
+            { key: 'branch_name', label: 'Branch' },
+            { key: 'total_appointments', label: 'Total Appointments' },
+            { key: 'completed_appointments', label: 'Completed' },
+            { key: 'total_revenue', label: 'Total Revenue' },
+            { key: 'collected_revenue', label: 'Collected' },
+            { key: 'outstanding_revenue', label: 'Outstanding' }
+        ]);
+    } catch (err) {
+        console.error('Error exporting doctor revenue:', err);
+        console.error('Error details:', err.message);
+        res.status(500).json({ error: "Error exporting doctor revenue report" });
+    }
+};
+
+const exportOutstandingBalances = async (req, res) => {
+    try {
+        const { format } = req.body;
+        
+        const result = await pool.query(`
+            SELECT *
+            FROM patient_outstanding_summary
+            ORDER BY outstanding_balance DESC, oldest_overdue_date ASC NULLS LAST
+        `);
+
+        const data = result.rows;
+        const title = 'Outstanding Balances Report';
+        const dateRange = 'Current';
+
+        await generatePDF(res, title, dateRange, data, [
+            { key: 'patient_name', label: 'Patient' },
+            { key: 'total_outstanding', label: 'Total Outstanding' },
+            { key: 'outstanding_balance', label: 'Outstanding Balance' },
+            { key: 'oldest_overdue_date', label: 'Oldest Overdue' },
+            { key: 'invoice_count', label: 'Invoice Count' }
+        ]);
+    } catch (err) {
+        console.error('Error exporting outstanding balances:', err);
+        res.status(500).json({ error: "Error exporting outstanding balances report" });
+    }
+};
+
+const exportTreatmentAnalysis = async (req, res) => {
+    try {
+        const { start_date, end_date } = req.body;
+        
+        let dateFilter = '';
+        const params = [];
+        if (start_date && end_date) {
+            dateFilter = 'AND tr.created_at >= $1 AND tr.created_at <= $2';
+            params.push(start_date, end_date);
+        }
+
+        const result = await pool.query(`
+            SELECT 
+                tc.name as category,
+                COUNT(DISTINCT tr.id) as treatment_count,
+                COALESCE(SUM(tr.quantity), 0) as total_quantity,
+                COALESCE(SUM(tr.total_price), 0) as total_revenue,
+                COALESCE(AVG(tr.unit_price), 0) as avg_price
+            FROM treatment_categories tc
+            LEFT JOIN treatments t ON tc.id = t.category_id
+            LEFT JOIN treatment_records tr ON t.id = tr.treatment_id ${dateFilter}
+            GROUP BY tc.id, tc.name
+            ORDER BY total_revenue DESC
+        `, params);
+
+        const data = result.rows;
+        const title = 'Treatment Analysis Report';
+        const dateRange = start_date && end_date ? `${start_date} to ${end_date}` : 'All Time';
+
+        await generatePDF(res, title, dateRange, data, [
+            { key: 'category', label: 'Category' },
+            { key: 'treatment_count', label: 'Treatment Count' },
+            { key: 'total_quantity', label: 'Total Quantity' },
+            { key: 'total_revenue', label: 'Total Revenue' },
+            { key: 'avg_price', label: 'Avg Price' }
+        ]);
+    } catch (err) {
+        console.error('Error exporting treatment analysis:', err);
+        res.status(500).json({ error: "Error exporting treatment analysis report" });
+    }
+};
+
+// Helper functions for generating different export formats
+const generatePDF = async (res, title, dateRange, data, columns) => {
+    const doc = new PDFDocument();
+    const filename = `${title.replace(/\s+/g, '_')}_${new Date().toISOString().split('T')[0]}.pdf`;
+    
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    
+    doc.pipe(res);
+    
+    // Title
+    doc.fontSize(20).text(title, 50, 50);
+    doc.fontSize(12).text(`Date Range: ${dateRange}`, 50, 80);
+    doc.fontSize(12).text(`Generated: ${new Date().toLocaleDateString()}`, 50, 100);
+    
+    // Table
+    let y = 130;
+    const colWidth = (doc.page.width - 100) / columns.length;
+    
+    // Headers
+    doc.fontSize(10).font('Helvetica-Bold');
+    columns.forEach((col, index) => {
+        doc.text(col.label, 50 + (index * colWidth), y);
+    });
+    
+    // Draw line under headers
+    doc.moveTo(50, y + 15).lineTo(doc.page.width - 50, y + 15).stroke();
+    y += 25;
+    
+    // Data rows
+    doc.font('Helvetica');
+    data.forEach(row => {
+        columns.forEach((col, index) => {
+            const value = row[col.key] || '';
+            doc.text(String(value), 50 + (index * colWidth), y);
+        });
+        y += 20;
+        
+        // Check if we need a new page
+        if (y > doc.page.height - 50) {
+            doc.addPage();
+            y = 50;
+        }
+    });
+    
+    doc.end();
+};
+
+
 module.exports = {
     getBranchSummary,
     getDoctorRevenue,
@@ -320,6 +559,10 @@ module.exports = {
     getDailyAppointmentSummary,
     getRevenueAnalytics,
     getReconciliationReport,
-    getNotificationReport
+    getNotificationReport,
+    exportBranchSummary,
+    exportDoctorRevenue,
+    exportOutstandingBalances,
+    exportTreatmentAnalysis
 };
 

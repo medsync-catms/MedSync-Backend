@@ -17,5 +17,11 @@ router.get('/revenue-analytics', requireManagerOrAdmin, reportsController.getRev
 router.get('/reconciliation', requireManagerOrAdmin, reportsController.getReconciliationReport);
 router.get('/notification-report', requireManagerOrAdmin, reportsController.getNotificationReport);
 
+// Export routes
+router.post('/branch-summary/export', requireManagerOrAdmin, reportsController.exportBranchSummary);
+router.post('/doctor-revenue/export', requireManagerOrAdmin, reportsController.exportDoctorRevenue);
+router.post('/outstanding-balances/export', requireManagerOrAdmin, reportsController.exportOutstandingBalances);
+router.post('/treatment-analysis/export', requireManagerOrAdmin, reportsController.exportTreatmentAnalysis);
+
 module.exports = router;
 
