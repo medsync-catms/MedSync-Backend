@@ -54,8 +54,26 @@ const registerPatient = async (req, res) => {
             emergency_contact_name,
             emergency_contact_phone,
             emergency_contact_relation,
-            insurance
+            insurance,
+            // Support camelCase field names from frontend/tests
+            firstName,
+            lastName,
+            dateOfBirth,
+            registeredBranch,
+            emergencyContactName,
+            emergencyContactPhone,
+            emergencyContactRelation,
+            emergencyContact
         } = req.body;
+
+        // Use camelCase values if snake_case values are not provided
+        const finalFirstName = first_name || firstName;
+        const finalLastName = last_name || lastName;
+        const finalDateOfBirth = date_of_birth || dateOfBirth;
+        const finalRegisteredBranch = registered_branch || registeredBranch;
+        const finalEmergencyContactName = emergency_contact_name || emergencyContactName;
+        const finalEmergencyContactPhone = emergency_contact_phone || emergencyContactPhone;
+        const finalEmergencyContactRelation = emergency_contact_relation || emergencyContactRelation;
 
         // Insert address only if provided, otherwise leave address_id null
         let address_id = null;
@@ -70,16 +88,16 @@ const registerPatient = async (req, res) => {
         // Then create the patient with the address_id (may be null)
         const newPatient = await client.query(
             "INSERT INTO patients(first_name, last_name, date_of_birth, gender, address_id, phone, email, registered_branch, is_active, emergency_contact_name, emergency_contact_phone, emergency_contact_relation) VALUES($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12) RETURNING *",
-            [first_name, last_name, date_of_birth, gender, address_id, phone, email, registered_branch, is_active !== undefined ? is_active : true, emergency_contact_name || null, emergency_contact_phone || null, emergency_contact_relation || null]
+            [finalFirstName, finalLastName, finalDateOfBirth, gender, address_id, phone, email, finalRegisteredBranch, is_active !== undefined ? is_active : true, finalEmergencyContactName || null, finalEmergencyContactPhone || null, finalEmergencyContactRelation || null]
         );
 
         const patient_id = newPatient.rows[0].id;
 
         // Support emergency contact provided either as separate fields or as an object emergency_contact
-        const emergencyObj = req.body.emergency_contact || {
-            name: emergency_contact_name,
-            phone: emergency_contact_phone,
-            relation: emergency_contact_relation
+        const emergencyObj = req.body.emergency_contact || emergencyContact || {
+            name: finalEmergencyContactName,
+            phone: finalEmergencyContactPhone,
+            relation: finalEmergencyContactRelation
         };
 
         // Save emergency contact if any meaningful field provided
@@ -91,16 +109,20 @@ const registerPatient = async (req, res) => {
         }
 
         // Save insurance if provided with all required fields
-        if (insurance && insurance.provider_id && insurance.policy_number && insurance.expiration_date) {
+        if (insurance && (insurance.provider_id || insurance.providerId) && (insurance.policy_number || insurance.policyNumber) && (insurance.expiration_date || insurance.expirationDate)) {
+            const providerId = insurance.provider_id || insurance.providerId;
+            const policyNumber = insurance.policy_number || insurance.policyNumber;
+            const expirationDate = insurance.expiration_date || insurance.expirationDate;
+            
             const coverage_details = {
-                coverage_percentage: insurance.coverage_percentage || 80,
-                max_claim: insurance.max_claim || null,
+                coverage_percentage: insurance.coverage_percentage || insurance.coveragePercentage || 80,
+                max_claim: insurance.max_claim || insurance.maxClaim || null,
                 deductible: insurance.deductible || null
             };
 
             await client.query(
                 "INSERT INTO patient_insurance(patient_id, provider_id, policy_number, coverage_details, expiration_date, is_active) VALUES($1, $2, $3, $4, $5, $6)",
-                [patient_id, insurance.provider_id, insurance.policy_number, JSON.stringify(coverage_details), insurance.expiration_date, true]
+                [patient_id, providerId, policyNumber, JSON.stringify(coverage_details), expirationDate, true]
             );
         }
 
@@ -112,41 +134,57 @@ const registerPatient = async (req, res) => {
                    a.line1, a.line2, a.city, a.state, a.postal_code,
                    ec.name as emergency_contact_name,
                    ec.phone as emergency_contact_phone,
-                   ec.relation as emergency_contact_relation
+                   ec.relation as emergency_contact_relation,
+                   pi.id as insurance_id,
+                   pi.provider_id,
+                   pi.policy_number,
+                   pi.coverage_details,
+                   pi.expiration_date,
+                   pi.is_active as insurance_is_active,
+                   ip.name as insurance_provider_name
             FROM patients p
             LEFT JOIN addresses a ON p.address_id = a.id
             LEFT JOIN patient_contacts ec ON p.id = ec.patient_id
+            LEFT JOIN patient_insurance pi ON p.id = pi.patient_id
+            LEFT JOIN insurance_providers ip ON pi.provider_id = ip.id
             WHERE p.id = $1
         `, [patient_id]);
 
-        res.json(completePatient.rows[0]);
+        const patientData = completePatient.rows[0];
+        
+        // Structure the response with insurance data if present
+        const responseData = {
+            ...patientData,
+            insurance: patientData.insurance_id ? {
+                id: patientData.insurance_id,
+                provider_id: patientData.provider_id,
+                policy_number: patientData.policy_number,
+                coverage_details: patientData.coverage_details,
+                expiration_date: patientData.expiration_date,
+                is_active: patientData.insurance_is_active,
+                provider_name: patientData.insurance_provider_name
+            } : null
+        };
+        
+        // Remove insurance fields from main patient object
+        delete responseData.insurance_id;
+        delete responseData.provider_id;
+        delete responseData.policy_number;
+        delete responseData.coverage_details;
+        delete responseData.expiration_date;
+        delete responseData.insurance_is_active;
+        delete responseData.insurance_provider_name;
+
+        res.status(201).json({
+            success: true,
+            patient: responseData
+        });
     } catch (err) {
         await client.query('ROLLBACK');
         console.error('Error registering patient:', err);
         res.status(500).json({ error: "Error inserting patient data" });
     } finally {
         client.release();
-    }
-    try {
-        const { phone, emergency_contact_phone } = req.body;
-
-        // Validate phone numbers
-        if (!validatePhoneNumber(phone)) {
-            return res.status(400).json({ 
-                error: "Invalid phone number format. Must be 10 digits starting with 0" 
-            });
-        }
-
-        if (emergency_contact_phone && !validatePhoneNumber(emergency_contact_phone)) {
-            return res.status(400).json({ 
-                error: "Invalid emergency contact phone number format. Must be 10 digits starting with 0" 
-            });
-        }
-
-        // ... rest of your existing code ...
-    } catch (err) {
-        console.error('Error validating phone numbers:', err);
-        res.status(500).json({ error: "Error validating phone numbers" });
     }
 };
 // ...existing code...

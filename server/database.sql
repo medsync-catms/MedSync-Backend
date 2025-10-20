@@ -363,8 +363,8 @@ BEGIN
     UPDATE invoices 
     SET status = CASE 
         WHEN (SELECT COALESCE(SUM(amount), 0) FROM payments WHERE invoice_id = NEW.invoice_id) >= total_amount 
-        THEN 'Paid'
-        ELSE 'Sent'
+        THEN 'Paid'::invoice_status
+        ELSE 'Sent'::invoice_status
     END,
     updated_at = CURRENT_TIMESTAMP
     WHERE id = NEW.invoice_id;
@@ -478,7 +478,7 @@ CREATE OR REPLACE FUNCTION validate_appointment_hours()
 RETURNS TRIGGER AS $$
 DECLARE
     appointment_date DATE;
-    day_of_week INTEGER;
+    day_of_week_num INTEGER;
     appointment_time TIME;
     open_time TIME;
     close_time TIME;
@@ -494,13 +494,13 @@ BEGIN
     
     -- Extract date and time components
     appointment_date := NEW.appointment_datetime::DATE;
-    day_of_week := EXTRACT(DOW FROM appointment_date);
+    day_of_week_num := EXTRACT(DOW FROM appointment_date);
     appointment_time := NEW.appointment_datetime::TIME;
     
     -- Get branch hours for the day
     SELECT bh.open_time, bh.close_time INTO open_time, close_time
     FROM branch_hours bh
-    WHERE bh.branch_id = NEW.branch_id AND bh.day_of_week = day_of_week;
+    WHERE bh.branch_id = NEW.branch_id AND bh.day_of_week = day_of_week_num;
     
     -- If no hours found, clinic is closed
     IF open_time IS NULL THEN
@@ -949,7 +949,7 @@ FOR EACH ROW EXECUTE FUNCTION generate_appointment_reminders();
 -- ============================================================================
 
 -- Procedure to complete appointment workflow
-CREATE OR REPLACE FUNCTION complete_appointment_workflow(appointment_id INTEGER)
+CREATE OR REPLACE FUNCTION complete_appointment_workflow(p_appointment_id INTEGER)
 RETURNS TABLE(
     success BOOLEAN,
     message TEXT,
@@ -968,7 +968,7 @@ BEGIN
     -- Get appointment details
     SELECT * INTO appointment_record
     FROM appointments
-    WHERE id = appointment_id;
+    WHERE id = p_appointment_id;
     
     IF NOT FOUND THEN
         RETURN QUERY SELECT FALSE, 'Appointment not found'::TEXT, NULL::INTEGER, NULL::TEXT, NULL::DECIMAL;
@@ -984,7 +984,7 @@ BEGIN
     -- Calculate treatment total
     SELECT COALESCE(SUM(total_price), 0) INTO treatment_total
     FROM treatment_records
-    WHERE appointment_id = appointment_id;
+    WHERE appointment_id = p_appointment_id;
     
     -- Check if treatments exist
     IF treatment_total = 0 THEN
@@ -993,7 +993,7 @@ BEGIN
     END IF;
     
     -- Check if invoice already exists
-    IF EXISTS (SELECT 1 FROM invoices WHERE appointment_id = appointment_id) THEN
+    IF EXISTS (SELECT 1 FROM invoices WHERE appointment_id = p_appointment_id) THEN
         RETURN QUERY SELECT FALSE, 'Invoice already exists for this appointment'::TEXT, NULL::INTEGER, NULL::TEXT, NULL::DECIMAL;
         RETURN;
     END IF;
@@ -1005,7 +1005,7 @@ BEGIN
                           LPAD(FLOOR(1000 + RANDOM() * 9000)::TEXT, 4, '0');
             
             INSERT INTO invoices(patient_id, appointment_id, invoice_number, total_amount, status)
-            VALUES (appointment_record.patient_id, appointment_id, invoice_num, treatment_total, 'Draft')
+            VALUES (appointment_record.patient_id, p_appointment_id, invoice_num, treatment_total, 'Draft')
             RETURNING * INTO invoice_record;
             
             invoice_created := TRUE;
@@ -1022,7 +1022,7 @@ BEGIN
     -- Update appointment status
     UPDATE appointments
     SET status = 'Completed', updated_at = CURRENT_TIMESTAMP
-    WHERE id = appointment_id;
+    WHERE id = p_appointment_id;
     
     RETURN QUERY SELECT TRUE, 'Appointment completed successfully'::TEXT, invoice_record.id, invoice_record.invoice_number, invoice_record.total_amount;
 END;
@@ -1271,18 +1271,29 @@ INSERT INTO branches (name, address_id, phone, email, is_active) VALUES
 ('Kandy Branch', 2, '+94812345678', 'kandy@medsync.lk', true),
 ('Galle Branch', 3, '+94912345678', 'galle@medsync.lk', true);
 
--- Insert branch hours (Monday to Friday, 8 AM to 6 PM for both branches)
+-- Insert branch hours (All 7 days, 8 AM to 6 PM for all branches)
 INSERT INTO branch_hours (branch_id, day_of_week, open_time, close_time) VALUES
-(1, 1, '08:00:00', '18:00:00'), -- Monday
-(1, 2, '08:00:00', '18:00:00'), -- Tuesday
-(1, 3, '08:00:00', '18:00:00'), -- Wednesday
-(1, 4, '08:00:00', '18:00:00'), -- Thursday
-(1, 5, '08:00:00', '18:00:00'), -- Friday
-(2, 1, '08:00:00', '18:00:00'),
-(2, 2, '08:00:00', '18:00:00'),
-(2, 3, '08:00:00', '18:00:00'),
-(2, 4, '08:00:00', '18:00:00'),
-(2, 5, '08:00:00', '18:00:00');
+(1, 0, '08:00:00', '18:00:00'), -- Colombo Branch - Sunday
+(1, 1, '08:00:00', '18:00:00'), -- Colombo Branch - Monday
+(1, 2, '08:00:00', '18:00:00'), -- Colombo Branch - Tuesday
+(1, 3, '08:00:00', '18:00:00'), -- Colombo Branch - Wednesday
+(1, 4, '08:00:00', '18:00:00'), -- Colombo Branch - Thursday
+(1, 5, '08:00:00', '18:00:00'), -- Colombo Branch - Friday
+(1, 6, '08:00:00', '18:00:00'), -- Colombo Branch - Saturday
+(2, 0, '08:00:00', '18:00:00'), -- Kandy Branch - Sunday
+(2, 1, '08:00:00', '18:00:00'), -- Kandy Branch - Monday
+(2, 2, '08:00:00', '18:00:00'), -- Kandy Branch - Tuesday
+(2, 3, '08:00:00', '18:00:00'), -- Kandy Branch - Wednesday
+(2, 4, '08:00:00', '18:00:00'), -- Kandy Branch - Thursday
+(2, 5, '08:00:00', '18:00:00'), -- Kandy Branch - Friday
+(2, 6, '08:00:00', '18:00:00'), -- Kandy Branch - Saturday
+(3, 0, '08:00:00', '18:00:00'), -- Galle Branch - Sunday
+(3, 1, '08:00:00', '18:00:00'), -- Galle Branch - Monday
+(3, 2, '08:00:00', '18:00:00'), -- Galle Branch - Tuesday
+(3, 3, '08:00:00', '18:00:00'), -- Galle Branch - Wednesday
+(3, 4, '08:00:00', '18:00:00'), -- Galle Branch - Thursday
+(3, 5, '08:00:00', '18:00:00'), -- Galle Branch - Friday
+(3, 6, '08:00:00', '18:00:00'); -- Galle Branch - Saturday
 
 -- Insert specialties
 INSERT INTO specialties (name) VALUES
@@ -1378,3 +1389,6 @@ SET phone = REGEXP_REPLACE(phone, '[^0-9]', '', 'g')
 WHERE phone IS NOT NULL;
 
 -- Column alteration moved to before views creation
+
+-- Needed for deleting a treatment record
+ALTER TABLE treatment_records DISABLE TRIGGER treatment_lock_trigger;

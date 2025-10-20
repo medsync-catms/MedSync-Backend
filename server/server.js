@@ -79,6 +79,12 @@ app.use(notFoundHandler);
 // Error handler (must be last)
 app.use(errorHandler);
 
-app.listen(port, () => {
-    console.log(`MedSync server started on port ${port}`);
-});
+// Only start server if not in test mode
+if (process.env.NODE_ENV !== 'test') {
+    app.listen(port, () => {
+        console.log(`MedSync server started on port ${port}`);
+    });
+}
+
+// Export app for testing
+module.exports = app;

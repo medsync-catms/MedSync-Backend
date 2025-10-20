@@ -1,7 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const appointmentController = require('../controllers/appointmentController');
-const { requireAuth, requireStaffOrAbove } = require('../middleware/auth');
+const { requireAuth, requireStaffOrAbove, requireRole } = require('../middleware/auth');
 const { setAuditUser } = require('../middleware/audit');
 
 // Routes - Appointment management requires staff role or above
@@ -14,11 +14,11 @@ router.put('/:id/no-show', requireStaffOrAbove, setAuditUser, appointmentControl
 router.put('/:id/cancel', requireStaffOrAbove, setAuditUser, appointmentController.cancelWithReason);
 router.delete('/:id', requireStaffOrAbove, setAuditUser, appointmentController.deleteAppointment);
 
-// Treatment Records Routes - require staff or above
+// Treatment Records Routes - require doctor role for modifications
 router.get('/:id/treatments', requireAuth, appointmentController.getTreatmentRecords);
-router.post('/:id/treatments', requireStaffOrAbove, setAuditUser, appointmentController.addTreatmentRecord);
-router.put('/:id/treatments/:treatmentRecordId', requireStaffOrAbove, setAuditUser, appointmentController.updateTreatmentRecord);
-router.delete('/:id/treatments/:treatmentRecordId', requireStaffOrAbove, setAuditUser, appointmentController.deleteTreatmentRecord);
+router.post('/:id/treatments', requireRole('doctor'), setAuditUser, appointmentController.addTreatmentRecord);
+router.put('/:id/treatments/:treatmentRecordId', requireRole('doctor'), setAuditUser, appointmentController.updateTreatmentRecord);
+router.delete('/:id/treatments/:treatmentRecordId', requireRole('doctor'), setAuditUser, appointmentController.deleteTreatmentRecord);
 
 // Complete Appointment with Invoice - requires staff or above
 router.post('/:id/complete', requireStaffOrAbove, setAuditUser, appointmentController.completeAppointmentWithInvoice);

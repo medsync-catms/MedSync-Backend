@@ -3,7 +3,8 @@ const pool = require('../config/db');
 const setAuditUser = async (req, res, next) => {
     if (req.user && req.user.id) {
         try {
-            await pool.query('SET myapp.user_id = $1', [req.user.id.toString()]);
+            // Store user ID in request for use in controllers
+            req.auditUserId = req.user.id;
         } catch (err) {
             console.error('Failed to set user for audit log:', err);
         }

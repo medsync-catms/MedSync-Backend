@@ -476,7 +476,7 @@ const addTreatmentRecord = async (req, res) => {
 
         // Validate appointment status
         const appointmentCheck = await pool.query(
-            'SELECT status FROM appointments WHERE id = $1',
+            'SELECT status, doctor_id FROM appointments WHERE id = $1',
             [id]
         );
 
@@ -485,10 +485,28 @@ const addTreatmentRecord = async (req, res) => {
         }
 
         const appointmentStatus = appointmentCheck.rows[0].status;
+        const appointmentDoctorId = appointmentCheck.rows[0].doctor_id;
+
         if (!['In Progress', 'Completed'].includes(appointmentStatus)) {
             return res.status(400).json({ 
                 error: "Treatments can only be added to In Progress or Completed appointments" 
             });
+        }
+
+        // Only doctors can add treatments - verify user is a doctor
+        if (req.user.role !== 'doctor') {
+            return res.status(403).json({ error: "Access denied. Only doctors can add treatments." });
+        }
+
+        // Verify this is the doctor's appointment
+        const medicalStaffId = await getUserMedicalStaffId(req.user.id);
+        
+        if (!medicalStaffId) {
+            return res.status(403).json({ error: "Medical staff ID not found for user" });
+        }
+        
+        if (appointmentDoctorId !== medicalStaffId) {
+            return res.status(403).json({ error: "Access denied. Only the assigned doctor can add treatments for this appointment." });
         }
 
         // Check if invoice already exists for this appointment
@@ -503,12 +521,8 @@ const addTreatmentRecord = async (req, res) => {
             });
         }
 
-        // Get the doctor's medical staff ID from the appointment
-        const doctorResult = await pool.query(
-            'SELECT doctor_id FROM appointments WHERE id = $1',
-            [id]
-        );
-        const recorded_by = doctorResult.rows[0].doctor_id;
+        // Use the appointment's doctor as the recorded_by
+        const recorded_by = appointmentDoctorId;
 
         const result = await pool.query(
             `INSERT INTO treatment_records(appointment_id, treatment_id, quantity, unit_price, consultation_notes, recorded_by)
@@ -577,6 +591,32 @@ const updateTreatmentRecord = async (req, res) => {
         const { id, treatmentRecordId } = req.params;
         const { quantity, unit_price, consultation_notes } = req.body;
 
+        // Only doctors can update treatments - verify user is a doctor
+        if (req.user.role !== 'doctor') {
+            return res.status(403).json({ error: "Access denied. Only doctors can modify treatments." });
+        }
+
+        // Verify this is the doctor's appointment
+        const medicalStaffId = await getUserMedicalStaffId(req.user.id);
+        
+        if (!medicalStaffId) {
+            return res.status(403).json({ error: "Medical staff ID not found for user" });
+        }
+        
+        // Check if this appointment belongs to the doctor
+        const appointmentCheck = await pool.query(
+            'SELECT doctor_id FROM appointments WHERE id = $1',
+            [id]
+        );
+        
+        if (appointmentCheck.rows.length === 0) {
+            return res.status(404).json({ error: "Appointment not found" });
+        }
+        
+        if (appointmentCheck.rows[0].doctor_id !== medicalStaffId) {
+            return res.status(403).json({ error: "Access denied. Only the assigned doctor can modify treatments for this appointment." });
+        }
+
         // Check if invoice exists
         const invoiceCheck = await pool.query(
             'SELECT id FROM invoices WHERE appointment_id = $1',
@@ -614,6 +654,32 @@ const deleteTreatmentRecord = async (req, res) => {
     try {
         const { id, treatmentRecordId } = req.params;
 
+        // Only doctors can delete treatments - verify user is a doctor
+        if (req.user.role !== 'doctor') {
+            return res.status(403).json({ error: "Access denied. Only doctors can delete treatments." });
+        }
+
+        // Verify this is the doctor's appointment
+        const medicalStaffId = await getUserMedicalStaffId(req.user.id);
+        
+        if (!medicalStaffId) {
+            return res.status(403).json({ error: "Medical staff ID not found for user" });
+        }
+        
+        // Check if this appointment belongs to the doctor
+        const appointmentCheck = await pool.query(
+            'SELECT doctor_id FROM appointments WHERE id = $1',
+            [id]
+        );
+        
+        if (appointmentCheck.rows.length === 0) {
+            return res.status(404).json({ error: "Appointment not found" });
+        }
+        
+        if (appointmentCheck.rows[0].doctor_id !== medicalStaffId) {
+            return res.status(403).json({ error: "Access denied. Only the assigned doctor can delete treatments for this appointment." });
+        }
+
         // Check if invoice exists
         const invoiceCheck = await pool.query(
             'SELECT id FROM invoices WHERE appointment_id = $1',
@@ -627,8 +693,8 @@ const deleteTreatmentRecord = async (req, res) => {
         }
 
         const result = await pool.query(
-            'DELETE FROM treatment_records WHERE id = $1 AND appointment_id = $2 RETURNING *',
-            [treatmentRecordId, id]
+            'DELETE FROM treatment_records WHERE id = $1 RETURNING *',
+            [treatmentRecordId]
         );
 
         if (result.rows.length === 0) {
