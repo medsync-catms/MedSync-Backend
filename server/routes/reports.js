@@ -1,21 +1,21 @@
 const express = require('express');
-const sessionMiddleware = require('../config/session');
-const passport = require('../config/passport');
 const router = express.Router();
 const reportsController = require('../controllers/reportsController');
-const { requireAuth } = require('../middleware/auth');
+const { requireManagerOrAdmin } = require('../middleware/auth');
 
-// Apply middleware
-router.use(express.json());
-router.use(sessionMiddleware);
-router.use(passport.initialize());
-router.use(passport.session());
+// Routes - Reports require manager or admin role
+router.get('/branch-summary', requireManagerOrAdmin, reportsController.getBranchSummary);
+router.get('/doctor-revenue', requireManagerOrAdmin, reportsController.getDoctorRevenue);
+router.get('/outstanding-balances', requireManagerOrAdmin, reportsController.getOutstandingBalances);
+router.get('/treatment-analysis', requireManagerOrAdmin, reportsController.getTreatmentAnalysis);
 
-// Routes
-router.get('/branch-summary', requireAuth, reportsController.getBranchSummary);
-router.get('/doctor-revenue', requireAuth, reportsController.getDoctorRevenue);
-router.get('/outstanding-balances', requireAuth, reportsController.getOutstandingBalances);
-router.get('/treatment-analysis', requireAuth, reportsController.getTreatmentAnalysis);
+// New report endpoints using database views
+router.get('/insurance-claim-analytics', requireManagerOrAdmin, reportsController.getInsuranceClaimAnalytics);
+router.get('/appointment-analytics', requireManagerOrAdmin, reportsController.getAppointmentAnalytics);
+router.get('/daily-appointment-summary', requireManagerOrAdmin, reportsController.getDailyAppointmentSummary);
+router.get('/revenue-analytics', requireManagerOrAdmin, reportsController.getRevenueAnalytics);
+router.get('/reconciliation', requireManagerOrAdmin, reportsController.getReconciliationReport);
+router.get('/notification-report', requireManagerOrAdmin, reportsController.getNotificationReport);
 
 module.exports = router;
 

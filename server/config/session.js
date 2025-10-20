@@ -4,7 +4,7 @@ const { v7: uuidv7 } = require('uuid');
 const pool = require('./db');
 const path = require('path');
 
-require('dotenv').config({ path: path.join(__dirname, '../../.env') });
+require('dotenv').config({ path: path.join(__dirname, '../.env') });
 
 const sessionConfig = {
     genid: (req) => {
@@ -15,14 +15,15 @@ const sessionConfig = {
         tableName: 'session',
         pruneSessionInterval: 60 * 60
     }),
-    secret: process.env.SESSION_SECRET,
+    secret: process.env.SESSION_SECRET  || 'secret_string',
     resave: false,
     saveUninitialized: false,
     cookie: {
         maxAge: 1000 * 60 * 60 * 24,
         httpOnly: true,
         secure: process.env.NODE_ENV === 'production',
-        sameSite: 'lax'
+        sameSite: 'lax',
+        domain: process.env.NODE_ENV === 'production' ? undefined : 'localhost'
     }
 };
 

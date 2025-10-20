@@ -83,26 +83,11 @@ const getDoctorRevenue = async (req, res) => {
 
 const getOutstandingBalances = async (req, res) => {
     try {
+        // Use the database view for better performance
         const result = await pool.query(`
-            SELECT 
-                p.id as patient_id,
-                p.first_name || ' ' || p.last_name as patient_name,
-                p.phone as contact,
-                i.invoice_number,
-                i.id as invoice_id,
-                i.total_amount,
-                COALESCE(SUM(pay.amount), 0) as paid_amount,
-                i.total_amount - COALESCE(SUM(pay.amount), 0) as amount_due,
-                i.created_at as invoice_date,
-                DATE_PART('day', CURRENT_TIMESTAMP - i.created_at) as days_overdue,
-                i.status
-            FROM invoices i
-            JOIN patients p ON i.patient_id = p.id
-            LEFT JOIN payments pay ON i.id = pay.invoice_id
-            WHERE i.status IN ('Sent', 'Overdue')
-            GROUP BY p.id, p.first_name, p.last_name, p.phone, i.id, i.invoice_number, i.total_amount, i.created_at, i.status
-            HAVING i.total_amount - COALESCE(SUM(pay.amount), 0) > 0
-            ORDER BY days_overdue DESC, amount_due DESC
+            SELECT *
+            FROM patient_outstanding_summary
+            ORDER BY outstanding_balance DESC, oldest_overdue_date ASC NULLS LAST
         `);
 
         res.json(result.rows);
@@ -144,10 +129,197 @@ const getTreatmentAnalysis = async (req, res) => {
     }
 };
 
+// New report endpoints using database views
+const getInsuranceClaimAnalytics = async (req, res) => {
+    try {
+        const { months_back } = req.query;
+        const months = parseInt(months_back) || 12;
+        
+        const result = await pool.query(`
+            SELECT *
+            FROM insurance_claim_analytics
+            WHERE month >= CURRENT_DATE - INTERVAL '${months} months'
+            ORDER BY month DESC, provider_name
+        `);
+
+        res.json(result.rows);
+    } catch (err) {
+        console.error('Error getting insurance claim analytics:', err);
+        res.status(500).json({ error: "Error getting insurance claim analytics" });
+    }
+};
+
+const getAppointmentAnalytics = async (req, res) => {
+    try {
+        const { months_back, branch_id } = req.query;
+        const months = parseInt(months_back) || 12;
+        
+        let query = `
+            SELECT *
+            FROM appointment_analytics
+            WHERE month >= CURRENT_DATE - INTERVAL '${months} months'
+        `;
+        
+        const params = [];
+        if (branch_id) {
+            query += ' AND branch_name = $1';
+            params.push(branch_id);
+        }
+        
+        query += ' ORDER BY month DESC, branch_name, specialty';
+        
+        const result = await pool.query(query, params);
+        res.json(result.rows);
+    } catch (err) {
+        console.error('Error getting appointment analytics:', err);
+        res.status(500).json({ error: "Error getting appointment analytics" });
+    }
+};
+
+const getDailyAppointmentSummary = async (req, res) => {
+    try {
+        const { start_date, end_date, branch_id } = req.query;
+        
+        let query = `
+            SELECT *
+            FROM daily_appointment_summary
+            WHERE 1=1
+        `;
+        
+        const params = [];
+        let paramCount = 1;
+        
+        if (start_date) {
+            query += ` AND appointment_date >= $${paramCount++}`;
+            params.push(start_date);
+        }
+        
+        if (end_date) {
+            query += ` AND appointment_date <= $${paramCount++}`;
+            params.push(end_date);
+        }
+        
+        if (branch_id) {
+            query += ` AND branch_name = $${paramCount++}`;
+            params.push(branch_id);
+        }
+        
+        query += ' ORDER BY appointment_date DESC, branch_name';
+        
+        const result = await pool.query(query, params);
+        res.json(result.rows);
+    } catch (err) {
+        console.error('Error getting daily appointment summary:', err);
+        res.status(500).json({ error: "Error getting daily appointment summary" });
+    }
+};
+
+const getRevenueAnalytics = async (req, res) => {
+    try {
+        const { months_back, branch_id } = req.query;
+        const months = parseInt(months_back) || 12;
+        
+        let query = `
+            SELECT *
+            FROM revenue_analytics
+            WHERE month >= CURRENT_DATE - INTERVAL '${months} months'
+        `;
+        
+        const params = [];
+        if (branch_id) {
+            query += ' AND branch_name = $1';
+            params.push(branch_id);
+        }
+        
+        query += ' ORDER BY month DESC, branch_name';
+        
+        const result = await pool.query(query, params);
+        res.json(result.rows);
+    } catch (err) {
+        console.error('Error getting revenue analytics:', err);
+        res.status(500).json({ error: "Error getting revenue analytics" });
+    }
+};
+
+const getReconciliationReport = async (req, res) => {
+    try {
+        const { target_date } = req.query;
+        const date = target_date || new Date().toISOString().split('T')[0];
+        
+        // Use stored procedure for payment reconciliation
+        const result = await pool.query(
+            'SELECT * FROM reconcile_daily_payments($1)',
+            [date]
+        );
+        
+        res.json({
+            date: date,
+            reconciliation: result.rows,
+            summary: {
+                total_transactions: result.rows.reduce((sum, row) => sum + parseInt(row.transaction_count), 0),
+                total_amount: result.rows.reduce((sum, row) => sum + parseFloat(row.total_amount), 0),
+                methods: result.rows.length
+            }
+        });
+    } catch (err) {
+        console.error('Error getting reconciliation report:', err);
+        res.status(500).json({ error: "Error getting reconciliation report" });
+    }
+};
+
+const getNotificationReport = async (req, res) => {
+    try {
+        const { start_date, end_date, type } = req.query;
+        
+        let query = `
+            SELECT 
+                n.type,
+                n.status,
+                COUNT(*) as count,
+                COUNT(CASE WHEN n.sent_at IS NOT NULL THEN 1 END) as sent_count,
+                COUNT(CASE WHEN n.status = 'failed' THEN 1 END) as failed_count
+            FROM notifications n
+            WHERE 1=1
+        `;
+        
+        const params = [];
+        let paramCount = 1;
+        
+        if (start_date) {
+            query += ` AND n.created_at >= $${paramCount++}`;
+            params.push(start_date);
+        }
+        
+        if (end_date) {
+            query += ` AND n.created_at <= $${paramCount++}`;
+            params.push(end_date);
+        }
+        
+        if (type) {
+            query += ` AND n.type = $${paramCount++}`;
+            params.push(type);
+        }
+        
+        query += ' GROUP BY n.type, n.status ORDER BY n.type, n.status';
+        
+        const result = await pool.query(query, params);
+        res.json(result.rows);
+    } catch (err) {
+        console.error('Error getting notification report:', err);
+        res.status(500).json({ error: "Error getting notification report" });
+    }
+};
+
 module.exports = {
     getBranchSummary,
     getDoctorRevenue,
     getOutstandingBalances,
-    getTreatmentAnalysis
+    getTreatmentAnalysis,
+    getInsuranceClaimAnalytics,
+    getAppointmentAnalytics,
+    getDailyAppointmentSummary,
+    getRevenueAnalytics,
+    getReconciliationReport,
+    getNotificationReport
 };
 
