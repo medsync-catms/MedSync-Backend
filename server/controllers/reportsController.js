@@ -318,6 +318,59 @@ const getNotificationReport = async (req, res) => {
     }
 };
 
+const getInsuranceCoverageReport = async (req, res) => {
+    try {
+        const { start_date, end_date, branch_id } = req.query;
+        
+        const params = [];
+        let paramCount = 1;
+        const whereClauses = [];
+
+        // Build WHERE clauses
+        if (start_date && end_date) {
+            whereClauses.push(`i.created_at >= $${paramCount++}`);
+            whereClauses.push(`i.created_at <= $${paramCount++}`);
+            params.push(start_date, end_date);
+        }
+        if (branch_id) {
+            whereClauses.push(`a.branch_id = $${paramCount++}`);
+            params.push(branch_id);
+        }
+
+        const whereClause = whereClauses.length > 0 ? `WHERE ${whereClauses.join(' AND ')}` : '';
+
+        const result = await pool.query(`
+            SELECT 
+                p.first_name || ' ' || p.last_name as patient_name,
+                COALESCE(SUM(i.total_amount), 0) as total_amount,
+                COALESCE(SUM(CASE WHEN ic.status = 'Paid' THEN ic.approved_amount ELSE 0 END), 0) as insurance_coverage,
+                COALESCE(SUM(CASE WHEN pay.payment_method != 'Insurance' THEN pay.amount ELSE 0 END), 0) as out_of_pocket,
+                COUNT(DISTINCT ic.id) as claim_count,
+                COUNT(DISTINCT CASE WHEN pay.payment_method != 'Insurance' THEN pay.id END) as payment_count,
+                CASE 
+                    WHEN SUM(i.total_amount) > 0 
+                    THEN ROUND(100.0 * SUM(CASE WHEN ic.status = 'Paid' THEN ic.approved_amount ELSE 0 END) / SUM(i.total_amount), 2)
+                    ELSE 0 
+                END as coverage_percentage,
+                b.name as branch_name
+            FROM invoices i
+            LEFT JOIN patients p ON i.patient_id = p.id
+            LEFT JOIN appointments a ON i.appointment_id = a.id
+            LEFT JOIN branches b ON a.branch_id = b.id
+            LEFT JOIN insurance_claims ic ON i.id = ic.invoice_id
+            LEFT JOIN payments pay ON i.id = pay.invoice_id
+            ${whereClause}
+            GROUP BY p.id, p.first_name, p.last_name, b.name
+            ORDER BY total_amount DESC
+        `, params);
+
+        res.json(result.rows);
+    } catch (err) {
+        console.error('Error getting insurance coverage report:', err);
+        res.status(500).json({ error: "Error getting insurance coverage report" });
+    }
+};
+
 // Export functions
 const exportBranchSummary = async (req, res) => {
     try {
@@ -500,6 +553,72 @@ const exportTreatmentAnalysis = async (req, res) => {
     }
 };
 
+const exportInsuranceCoverageReport = async (req, res) => {
+    try {
+        const { start_date, end_date, branch_id } = req.body;
+        
+        const params = [];
+        let paramCount = 1;
+        const whereClauses = [];
+
+        // Build WHERE clauses
+        if (start_date && end_date) {
+            whereClauses.push(`i.created_at >= $${paramCount++}`);
+            whereClauses.push(`i.created_at <= $${paramCount++}`);
+            params.push(start_date, end_date);
+        }
+        if (branch_id) {
+            whereClauses.push(`a.branch_id = $${paramCount++}`);
+            params.push(branch_id);
+        }
+
+        const whereClause = whereClauses.length > 0 ? `WHERE ${whereClauses.join(' AND ')}` : '';
+
+        const result = await pool.query(`
+            SELECT 
+                p.first_name || ' ' || p.last_name as patient_name,
+                COALESCE(SUM(i.total_amount), 0) as total_amount,
+                COALESCE(SUM(CASE WHEN ic.status = 'Paid' THEN ic.approved_amount ELSE 0 END), 0) as insurance_coverage,
+                COALESCE(SUM(CASE WHEN pay.payment_method != 'Insurance' THEN pay.amount ELSE 0 END), 0) as out_of_pocket,
+                COUNT(DISTINCT ic.id) as claim_count,
+                COUNT(DISTINCT CASE WHEN pay.payment_method != 'Insurance' THEN pay.id END) as payment_count,
+                CASE 
+                    WHEN SUM(i.total_amount) > 0 
+                    THEN ROUND(100.0 * SUM(CASE WHEN ic.status = 'Paid' THEN ic.approved_amount ELSE 0 END) / SUM(i.total_amount), 2)
+                    ELSE 0 
+                END as coverage_percentage,
+                b.name as branch_name
+            FROM invoices i
+            LEFT JOIN patients p ON i.patient_id = p.id
+            LEFT JOIN appointments a ON i.appointment_id = a.id
+            LEFT JOIN branches b ON a.branch_id = b.id
+            LEFT JOIN insurance_claims ic ON i.id = ic.invoice_id
+            LEFT JOIN payments pay ON i.id = pay.invoice_id
+            ${whereClause}
+            GROUP BY p.id, p.first_name, p.last_name, b.name
+            ORDER BY total_amount DESC
+        `, params);
+
+        const data = result.rows;
+        const title = 'Insurance Coverage vs. Out-of-Pocket Payments Report';
+        const dateRange = start_date && end_date ? `${start_date} to ${end_date}` : 'All Time';
+
+        await generatePDF(res, title, dateRange, data, [
+            { key: 'patient_name', label: 'Patient' },
+            { key: 'branch_name', label: 'Branch' },
+            { key: 'total_amount', label: 'Total Amount' },
+            { key: 'insurance_coverage', label: 'Insurance Coverage' },
+            { key: 'out_of_pocket', label: 'Out-of-Pocket' },
+            { key: 'coverage_percentage', label: 'Coverage %' },
+            { key: 'claim_count', label: 'Claims' },
+            { key: 'payment_count', label: 'Payments' }
+        ]);
+    } catch (err) {
+        console.error('Error exporting insurance coverage report:', err);
+        res.status(500).json({ error: "Error exporting insurance coverage report" });
+    }
+};
+
 // Helper functions for generating different export formats
 const generatePDF = async (res, title, dateRange, data, columns) => {
     const doc = new PDFDocument();
@@ -560,9 +679,11 @@ module.exports = {
     getRevenueAnalytics,
     getReconciliationReport,
     getNotificationReport,
+    getInsuranceCoverageReport,
     exportBranchSummary,
     exportDoctorRevenue,
     exportOutstandingBalances,
-    exportTreatmentAnalysis
+    exportTreatmentAnalysis,
+    exportInsuranceCoverageReport
 };
 
