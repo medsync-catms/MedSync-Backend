@@ -8,6 +8,7 @@ router.get('/branch-summary', requireManagerOrAdmin, reportsController.getBranch
 router.get('/doctor-revenue', requireManagerOrAdmin, reportsController.getDoctorRevenue);
 router.get('/outstanding-balances', requireManagerOrAdmin, reportsController.getOutstandingBalances);
 router.get('/treatment-analysis', requireManagerOrAdmin, reportsController.getTreatmentAnalysis);
+router.get('/insurance-coverage', requireManagerOrAdmin, reportsController.getInsuranceCoverageReport);
 
 // New report endpoints using database views
 router.get('/insurance-claim-analytics', requireManagerOrAdmin, reportsController.getInsuranceClaimAnalytics);
@@ -22,6 +23,7 @@ router.post('/branch-summary/export', requireManagerOrAdmin, reportsController.e
 router.post('/doctor-revenue/export', requireManagerOrAdmin, reportsController.exportDoctorRevenue);
 router.post('/outstanding-balances/export', requireManagerOrAdmin, reportsController.exportOutstandingBalances);
 router.post('/treatment-analysis/export', requireManagerOrAdmin, reportsController.exportTreatmentAnalysis);
+router.post('/insurance-coverage/export', requireManagerOrAdmin, reportsController.exportInsuranceCoverageReport);
 
 module.exports = router;
 

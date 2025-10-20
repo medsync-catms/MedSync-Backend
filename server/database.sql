@@ -1058,29 +1058,59 @@ BEGIN
     -- Update claim status
     UPDATE insurance_claims
     SET status = new_status,
-        approved_amount = CASE WHEN new_status = 'Approved' THEN approved_amount ELSE approved_amount END,
-        rejection_reason = CASE WHEN new_status = 'Rejected' THEN rejection_reason ELSE rejection_reason END,
+        approved_amount = CASE WHEN new_status = 'Approved' THEN process_insurance_claim.approved_amount ELSE insurance_claims.approved_amount END,
+        rejection_reason = CASE WHEN new_status = 'Rejected' THEN process_insurance_claim.rejection_reason ELSE insurance_claims.rejection_reason END,
         response_date = CURRENT_TIMESTAMP,
         updated_at = CURRENT_TIMESTAMP
     WHERE id = claim_id
     RETURNING * INTO claim_data;
     
-    -- If approved and paid, create payment record
-    IF new_status = 'Paid' THEN
-        -- Get invoice details
+    -- If approved or paid, create payment record
+    IF new_status IN ('Approved', 'Paid') THEN
+        -- Calculate total paid amount for this invoice
+        SELECT COALESCE(SUM(amount), 0) INTO total_paid
+        FROM payments
+        WHERE invoice_id = claim_data.invoice_id;
+        
+        -- Calculate remaining balance
+        remaining_balance := invoice_data.total_amount - total_paid;
+        
+        -- Determine payment amount (don't exceed remaining balance)
+        payment_amount := LEAST(approved_amount, remaining_balance);
+        
+        -- Only create payment if there's a remaining balance and approved amount > 0
+        IF remaining_balance > 0 AND payment_amount > 0 THEN
+            -- Create insurance payment
+            INSERT INTO payments (invoice_id, amount, payment_method, processed_by, notes)
+            VALUES (
+                claim_data.invoice_id,
+                payment_amount,
+                'Insurance',
+                (SELECT id FROM users WHERE role = 'admin' LIMIT 1),
+                'Insurance claim payment - ' || claim_data.claim_number || ' (Approved: ' || approved_amount || ', Paid: ' || payment_amount || ')'
+            );
+            
+            -- Update invoice status based on payment
+            IF payment_amount >= remaining_balance THEN
+                -- Fully paid
+                UPDATE invoices 
+                SET status = 'Paid', updated_at = CURRENT_TIMESTAMP
+                WHERE id = claim_data.invoice_id;
+            ELSE
+                -- Partially paid, keep as Sent or Overdue
+                UPDATE invoices 
+                SET status = CASE 
+                    WHEN status = 'Draft' THEN 'Sent'
+                    ELSE status 
+                END, updated_at = CURRENT_TIMESTAMP
+                WHERE id = claim_data.invoice_id;
+            END IF;
+        END IF;
+        
+        -- Refresh invoice data
         SELECT * INTO invoice_data
         FROM invoices
         WHERE id = claim_data.invoice_id;
-        
-        -- Create insurance payment
-        INSERT INTO payments (invoice_id, amount, payment_method, processed_by, notes)
-        VALUES (
-            claim_data.invoice_id,
-            approved_amount,
-            'Insurance',
-            (SELECT id FROM users WHERE role = 'admin' LIMIT 1),
-            'Insurance claim payment - ' || claim_data.claim_number
-        );
     END IF;
     
     RETURN QUERY SELECT TRUE, 'Insurance claim processed successfully'::TEXT, claim_data, invoice_data;

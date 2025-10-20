@@ -50,8 +50,16 @@ const getAllInvoices = async (req, res) => {
             params.push(patient_id);
         }
         if (status) {
-            query += ` AND i.status = $${paramCount++}`;
-            params.push(status);
+            // Handle multiple status values separated by commas
+            const statusList = status.split(',').map(s => s.trim()).filter(s => s);
+            if (statusList.length === 1) {
+                query += ` AND i.status = $${paramCount++}`;
+                params.push(statusList[0]);
+            } else if (statusList.length > 1) {
+                const placeholders = statusList.map(() => `$${paramCount++}`).join(',');
+                query += ` AND i.status IN (${placeholders})`;
+                params.push(...statusList);
+            }
         }
         if (start_date) {
             query += ` AND i.created_at >= $${paramCount++}`;
