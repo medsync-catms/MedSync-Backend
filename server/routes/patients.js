@@ -1,16 +1,8 @@
 const express = require('express');
-const sessionMiddleware = require('../config/session');
-const passport = require('../config/passport');
 const router = express.Router();
 const patientController = require('../controllers/patientController');
 const { requireAuth, requireStaffOrAbove, requireManagerOrAdmin } = require('../middleware/auth');
 const { setAuditUser } = require('../middleware/audit');
-
-// Apply middleware
-router.use(express.json());
-router.use(sessionMiddleware);
-router.use(passport.initialize());
-router.use(passport.session());
 
 // Routes - Patient management requires staff role or above
 router.get('/', requireAuth, patientController.getAllPatients);
