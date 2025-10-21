@@ -1,5 +1,5 @@
 const pool = require('../config/db');
-const { getUserMedicalStaffId } = require('../middleware/auth');
+const { getUserMedicalStaffId, getUserBranchId } = require('../middleware/auth');
 
 // Validation helper functions
 const checkDoctorConflict = async (doctor_id, appointment_datetime, exclude_appointment_id = null) => {
@@ -119,6 +119,15 @@ const getAllAppointments = async (req, res) => {
             doctor_id = medicalStaffId; // Override any doctor_id query param
         }
 
+        // If user is a nurse or receptionist, restrict to their branch
+        if (req.user && (req.user.role === 'nurse' || req.user.role === 'receptionist')) {
+            const userBranchId = await getUserBranchId(req.user.id);
+            if (!userBranchId) {
+                return res.status(403).json({ error: "User branch not found" });
+            }
+            branch_id = userBranchId; // Force branch scope
+        }
+
         let query = `
             SELECT a.*,
                    p.first_name as patient_first_name, p.last_name as patient_last_name,
@@ -201,6 +210,17 @@ const getAppointmentById = async (req, res) => {
             
             if (result.rows[0].doctor_id !== medicalStaffId) {
                 return res.status(403).json({ error: "Access denied. This is not your appointment." });
+            }
+        }
+
+        // If user is a nurse or receptionist, verify appointment is in their branch
+        if (req.user && (req.user.role === 'nurse' || req.user.role === 'receptionist')) {
+            const userBranchId = await getUserBranchId(req.user.id);
+            if (!userBranchId) {
+                return res.status(403).json({ error: "User branch not found" });
+            }
+            if (result.rows[0].branch_id !== userBranchId) {
+                return res.status(403).json({ error: "Access denied. Appointment belongs to a different branch." });
             }
         }
 

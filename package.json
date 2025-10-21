@@ -5,7 +5,8 @@
   "main": "server/server.js",
   "scripts": {
     "start": "node server/server.js",
-    "dev": "nodemon server/server.js"
+    "dev": "nodemon server/server.js",
+    "seed:demo": "node server/seedDemoData.js"
   },
   "dependencies": {
     "argon2": "^0.44.0",
