@@ -482,13 +482,10 @@ DECLARE
     appointment_time TIME;
     open_time TIME;
     close_time TIME;
-    is_emergency BOOLEAN;
 BEGIN
-    -- Check if this is an emergency appointment (allow override)
-    is_emergency := (NEW.type = 'Emergency');
-    
-    -- Skip validation for emergency appointments
-    IF is_emergency THEN
+    -- Skip validation for emergency and walk-in appointments
+    -- Walk-ins are already at the clinic, so they bypass hours validation
+    IF NEW.type IN ('Emergency', 'Walk-in') THEN
         RETURN NEW;
     END IF;
     
