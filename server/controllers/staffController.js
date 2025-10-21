@@ -254,7 +254,7 @@ const deleteStaff = async (req, res) => {
         
         // Soft delete - set is_active to false
         const result = await pool.query(
-            'UPDATE medical_staff SET is_active = false, updated_at = CURRENT_TIMESTAMP WHERE id = $1 RETURNING *',
+            'UPDATE medical_staff SET is_active = false WHERE id = $1 RETURNING *',
             [id]
         );
 
