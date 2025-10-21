@@ -247,7 +247,7 @@ const approveClaim = async (req, res) => {
 
         // Use stored procedure for claim processing
         const result = await pool.query(
-            'SELECT * FROM process_insurance_claim($1, $2, $3)',
+            'SELECT * FROM process_insurance_claim($1::INTEGER, $2::DECIMAL, $3::claim_status)',
             [id, approved_amount, 'Approved']
         );
 
@@ -435,7 +435,7 @@ const processClaimPayment = async (req, res) => {
 
         // Use stored procedure to process claim as paid
         const result = await pool.query(
-            'SELECT * FROM process_insurance_claim($1, $2, $3)',
+            'SELECT * FROM process_insurance_claim($1::INTEGER, $2::DECIMAL, $3::claim_status)',
             [id, approved_amount, 'Paid']
         );
 

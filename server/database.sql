@@ -1041,6 +1041,9 @@ RETURNS TABLE(
 DECLARE
     claim_data RECORD;
     invoice_data RECORD;
+    total_paid DECIMAL;
+    remaining_balance DECIMAL;
+    payment_amount DECIMAL;
 BEGIN
     -- Get claim details
     SELECT * INTO claim_data
@@ -1051,6 +1054,11 @@ BEGIN
         RETURN QUERY SELECT FALSE, 'Insurance claim not found'::TEXT, NULL::RECORD, NULL::RECORD;
         RETURN;
     END IF;
+    
+    -- Get invoice details
+    SELECT * INTO invoice_data
+    FROM invoices
+    WHERE id = claim_data.invoice_id;
     
     -- Update claim status
     UPDATE insurance_claims
